@@ -1,0 +1,47 @@
+# Python 编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+.DS_Store
+
+# 虚拟环境
+venv/
+env/
+*.egg-info/
+*.eggs/
+
+# 安装的依赖包
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE / 编辑器相关文件
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter Notebook 缓存
+.ipynb_checkpoints
+
+# 日志和临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+*.swn
+
+# 数据库和环境变量
+*.sqlite3
+.env
+.env.local
+.env.production
+.env.development
+config.yaml
+
+# 生成的文档
+docs/_build/
+site/
+
+# 分布式计算相关
+.dask-worker-space/
