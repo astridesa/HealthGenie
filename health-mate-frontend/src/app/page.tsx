@@ -1,25 +1,27 @@
 "use client"; // This is a client component
 import { useCallback, useEffect, useState } from "react";
-import Visualization from "../components/Visualization";
-import ContentPanel from "../components/ContentPanel";
+import Visualization from "@/components/Visualization";
+import ContentPanel from "@/components/ContentPanel";
 import "./index.css";
-import { UNION_ANNOTATION_DATA } from "../data/livescore";
-import { nodes, links } from "../data/data";
+import { UNION_ANNOTATION_DATA } from "@/data/livescore";
+import { nodes, links } from "@/data/data";
 import {
   generateSelectedDataset,
   generateMentionedDataset,
-} from "../utils/utils";
-import SideBar from "../components/Sidebar";
+} from "@/utils/utils";
+import SideBar from "@/components/Sidebar";
 import { v4 as uuidv4 } from "uuid";
-import HistoryVisualization from "../components/HistoryVisualization";
-import ChatInput from "../components/ChatInput";
-import NodeTooltip from "../components/Tooltip";
+import HistoryVisualization from "@/components/HistoryVisualization";
+import ChatInput from "@/components/ChatInput";
+import NodeTooltip from "@/components/Tooltip";
 
 interface HistoryItem {
   id: string;
-  title: string;
+  type: string;
+  content: string;
   time: string;
-  chats: any[];
+  title?: string;
+  chats?: any[];
 }
 
 const App = () => {
@@ -59,6 +61,17 @@ const App = () => {
   const [tooltipProps, setTooltipProps] = useState<any>(null);
 
   const [graphHeight, setGraphHeight] = useState(80); // percentage of viewport height
+
+  const handleClearVisualization = () => {
+    // Reset visualization data to initial state
+    setVisData({ nodes, links });
+    setIsOverview(true);
+    setSelectedId(null);
+    setClickedNode(null);
+    setMentionedNodes([]);
+    setKeywordNodes([]);
+    setRelatedNodes([]);
+  };
 
   const handleClickedNode = useCallback((clickedNode: number) => {
     const node = nodes.find((node: any) => node.id === clickedNode);
@@ -160,7 +173,11 @@ const App = () => {
 
     if (currentHistory) {
       const usingHistory = hist.find((hi: any) => hi.id === currentHistory);
-      setChats(usingHistory.chats);
+      if (usingHistory) {
+        setChats(usingHistory.chats || []);
+      } else {
+        setChats([]);
+      }
     }
   }, [currentHistory, isInitialized]);
 
@@ -239,6 +256,7 @@ const App = () => {
           localHistory={localHistory}
           setLocalHistory={setLocalHistory}
           setCurrentHistory={setCurrentHistory}
+          onClearVisualization={handleClearVisualization}
         />
 
         <div className="flex-1 flex flex-col h-full">
@@ -293,6 +311,9 @@ const App = () => {
           localUserId={localUserId}
           recommendQuery={recommendQuery}
           setRecommendQuery={setRecommendQuery}
+          onSendMessage={() => {}}
+          isLoading={false}
+          currentHistory={currentHistory}
         />
       </div>
 

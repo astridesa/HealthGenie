@@ -112,8 +112,11 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
   const applyMutation = useMutation({
     mutationFn: () => applyHistory(localUserId),
     onSuccess: () => {
-      // Just clear the local history
-      setLocalHistory([]);
+      // Only clear visualization operations (include/exclude), keep chat sessions
+      const chatSessions = localHistory.filter(item => 
+        item.type === 'chat' || item.type === 'recommendation'
+      );
+      setLocalHistory(chatSessions);
     },
   });
 
@@ -124,8 +127,11 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
   };
 
   const handleApply = () => {
-    // Clear local history immediately
-    setLocalHistory([]);
+    // Only clear visualization operations (include/exclude), keep chat sessions
+    const chatSessions = localHistory.filter(item => 
+      item.type === 'chat' || item.type === 'recommendation'
+    );
+    setLocalHistory(chatSessions);
     // Then trigger the mutation
     applyMutation.mutate();
   };

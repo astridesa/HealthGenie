@@ -183,9 +183,9 @@ def write_history(history):
         content = history["content"]
         time = history["time"]
 
-        # Only write include/exclude operations to history.csv
-        if type not in ["include", "exclude", "cancel", "apply"]:
-            logger.info(f"Skipping non-operation history: type={type}")
+        # Accept include/exclude/cancel/apply/chat operations
+        if type not in ["include", "exclude", "cancel", "apply", "chat"]:
+            logger.info(f"Skipping unsupported history type: type={type}")
             return
 
         logger.info(
@@ -279,8 +279,8 @@ def write_click_history():
         type = data.get("type", "")
         time = data.get("time", "")
 
-        # Only write include/exclude operations
-        if type not in ["include", "exclude", "cancel", "apply"]:
+        # Accept include/exclude/cancel/apply/chat operations
+        if type not in ["include", "exclude", "cancel", "apply", "chat"]:
             logger.info(f"Rejecting non-operation type: {type}")
             return jsonify({"message": "Operation type not supported"}), 400
 
