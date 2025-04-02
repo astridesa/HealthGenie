@@ -10,8 +10,6 @@ interface TooltipProps {
   title: string;
   content: string;
   setTooltipProps: (props: any) => void;
-  setChats: (chats: any) => void;
-  setRecommendQuery: (query: string) => void;
   setVisData: (data: any) => void;
   currentHistory: string;
   localHistory: any[];
@@ -19,30 +17,38 @@ interface TooltipProps {
   localUserId: string;
 }
 
-const includeRecipe = async ({ nodeName, type, currentHistory, localUserId, localHistory, setLocalHistory }: any) => {
-  // Only send the include/exclude information to history
-  await fetch(`${SERVER_URL}/api/history`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+const includeRecipe = async ({ nodeName, type, localUserId, localHistory, setLocalHistory }: any) => {
+  try {
+    // Send the include/exclude operation to server
+    const response = await fetch(`${SERVER_URL}/api/history`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: localUserId,
+        content: nodeName,
+        type: type,
+        time: new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to update history');
+    }
+
+    // Only update local history if the server request was successful
+    const newHistory = [...localHistory];
+    newHistory.push({
       id: localUserId,
       content: nodeName,
       type: type,
       time: new Date().toISOString(),
-    }),
-  });
-
-  // Update local history without triggering a new message
-  const newHistory = [...localHistory];
-  newHistory.push({
-    id: localUserId,
-    content: nodeName,
-    type: type,
-    time: new Date().toISOString(),
-  });
-  setLocalHistory(newHistory);
+    });
+    setLocalHistory(newHistory);
+  } catch (error) {
+    console.error('Error updating history:', error);
+  }
 };
 
 const NodeTooltip = ({
@@ -51,8 +57,6 @@ const NodeTooltip = ({
   title,
   content,
   setTooltipProps,
-  setChats,
-  setRecommendQuery,
   setVisData,
   currentHistory,
   localHistory,
@@ -61,6 +65,10 @@ const NodeTooltip = ({
 }: TooltipProps) => {
   const mutation = useMutation({
     mutationFn: includeRecipe,
+    onSuccess: () => {
+      // Close tooltip after successful operation
+      setTooltipProps(null);
+    },
   });
 
   return (
@@ -85,14 +93,16 @@ const NodeTooltip = ({
       </div>
       <div className="flex flex-col items-center w-full">
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "include", currentHistory, localUserId, localHistory, setLocalHistory })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "include", localUserId, localHistory, setLocalHistory })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
+          disabled={mutation.isPending}
         >
           Include
         </button>
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", currentHistory, localUserId, localHistory, setLocalHistory })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", localUserId, localHistory, setLocalHistory })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
+          disabled={mutation.isPending}
         >
           Exclude
         </button>

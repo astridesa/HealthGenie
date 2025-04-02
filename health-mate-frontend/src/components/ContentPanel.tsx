@@ -7,10 +7,39 @@ import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "../constant/server";
 import Selector from "./Selector";
 
+interface HistoryItem {
+  id: string;
+  type: string;
+  content: string;
+  time: string;
+}
+
+interface ContentPanelProps {
+  data: any;
+  selectedId: string | null;
+  localHistory: HistoryItem[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<HistoryItem[]>>;
+  chats: any[];
+  setChats: React.Dispatch<React.SetStateAction<any[]>>;
+  slideValue: number;
+  recommendQuery: string;
+  setRecommendQuery: React.Dispatch<React.SetStateAction<string>>;
+  onSendMessage: (message: string) => void;
+  isLoading: boolean;
+  handleMentionNode: (nodes: any[], keywordNodes: any[]) => void;
+  setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
+  clickedNode: any;
+  currentHistory: string;
+  showRelatedNode: (node: any) => void;
+  cancel: () => void;
+  setClickedNode: React.Dispatch<React.SetStateAction<any>>;
+  localUserId: string;
+}
+
 const sendRecommendationHistory = async (currentHistory: string, localUserId: string) => {
   try {
-    console.log("Sending recommendation history with userId:", localUserId); // Debug log
-    const response = await fetch(`${SERVER_URL}/api/history`, {
+    console.log("Sending recommendation request with userId:", localUserId); // Debug log
+    const response = await fetch(`${SERVER_URL}/api/recommend`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -18,10 +47,8 @@ const sendRecommendationHistory = async (currentHistory: string, localUserId: st
       },
       credentials: "include",
       body: JSON.stringify({
-        id: localUserId,
-        content: "Get personalized recommendation",
-        type: "recommendation",
-        time: new Date().toISOString(),
+        nodeName: currentHistory,
+        type: "recommendation"
       }),
     });
 
@@ -40,48 +67,78 @@ const sendRecommendationHistory = async (currentHistory: string, localUserId: st
   }
 };
 
-const sendQuestion = async ({ inputValue, clickedNode, history }: any) => {
-  const response = await fetch(`${SERVER_URL}/api/question`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      question: `${inputValue}.`,
-      clickedNode,
-      history,
-    }),
-  });
+const sendQuestion = async ({ inputValue, clickedNode }: any) => {
+  try {
+    console.log("Sending question:", { inputValue, clickedNode }); // Debug log
+    console.log("Server URL:", SERVER_URL); // Log the server URL being used
+    
+    const response = await fetch(`${SERVER_URL}/api/question`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        question: inputValue,
+        clickedNode,
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error("Network response was not ok");
+    console.log("Response status:", response.status); // Log response status
+    console.log("Response headers:", Object.fromEntries(response.headers.entries())); // Log response headers
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Server error details:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorData,
+        responseText: await response.text() // Get raw response text as fallback
+      });
+      throw new Error(errorData.error || `Server error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log("Server response:", data); // Debug log
+    return data;
+  } catch (error: any) {
+    console.error("Error in sendQuestion:", {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause
+    });
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      throw new Error("Network error: Unable to connect to the server. Please check your connection.");
+    }
+    throw error;
   }
-
-  return response.json();
 };
 
-const ContentPanel = ({
+const ContentPanel: React.FC<ContentPanelProps> = ({
   data,
   selectedId,
+  localHistory,
+  setLocalHistory,
+  chats = [],
+  setChats,
+  slideValue,
+  recommendQuery,
+  setRecommendQuery,
+  onSendMessage,
+  isLoading,
   handleMentionNode,
   setSelectedId,
   clickedNode,
   currentHistory,
-  localHistory,
-  setLocalHistory,
-  chats,
-  setChats,
-  slideValue,
   showRelatedNode,
   cancel,
   setClickedNode,
   localUserId,
-  recommendQuery,
-  setRecommendQuery,
-}: any) => {
-  const scrollableChatBox = useRef(null);
-
+}) => {
   const [inputValue, setInputValue] = useState("");
+  const scrollableChatBox = useRef<HTMLDivElement>(null);
 
   const [isInputing, setIsInputing] = useState(false);
 
@@ -116,18 +173,6 @@ const ContentPanel = ({
 
       setChats([...chats, answer]);
 
-      const localHistories = JSON.parse(
-        localStorage.getItem("history") as string,
-      );
-
-      localHistories.forEach((local: any) => {
-        if (local.id === currentHistory) {
-          local.chats.push(answer);
-        }
-      });
-
-      localStorage.setItem("history", JSON.stringify(localHistories));
-
       const targetIds = data.nodes
         .filter((node: any) => {
           return keywords.some(
@@ -150,17 +195,6 @@ const ContentPanel = ({
         });
       });
 
-      // targetIds.forEach((id: any) => {
-      //   data.links.forEach((link: any) => {
-      //     if (link.source.id === id) {
-      //       targetIds.push(link.target.id);
-      //     }
-      //     if (link.target.id === id) {
-      //       targetIds.push(link.source.id);
-      //     }
-      //   });
-      // });
-
       const uniqueTargetIds = [...new Set(targetIds)];
 
       const mentionedNodes = data.nodes.filter((node: any) => {
@@ -172,11 +206,18 @@ const ContentPanel = ({
       setUserInput("");
       setWaitingReponse(false);
 
-      setSelectedId(-1);
+      setSelectedId(null);
       setClickedNode(null);
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error("Error:", error);
+      // Add error message to chat
+      const errorMessage = {
+        from: "bot",
+        content: `Sorry, I encountered an error: ${error.message || "Unknown error occurred"}`,
+        id: uuidv4(),
+      };
+      setChats([...chats, errorMessage]);
       setWaitingReponse(false);
       setUserInput("");
     },
@@ -203,13 +244,8 @@ const ContentPanel = ({
   }, [waitingResponse]);
 
   const sendQuestionToBot = async () => {
-    const history = {
-      id: localUserId,
-      type: "chat",
-      content: userInput,
-      time: new Date().toISOString(),
-    };
-    mutation.mutate({ inputValue: userInput, clickedNode, history });
+    if (!userInput.trim()) return;
+    mutation.mutate({ inputValue: userInput, clickedNode });
   };
 
   useEffect(() => {
@@ -311,14 +347,17 @@ const ContentPanel = ({
             setIsInputing={setIsInputing}
             autoCompleteResponse={autoCompleteResponse}
             setAutoCompleteResponse={setAutoCompleteResponse}
-            currentHistory={currentHistory}
-            localHistory={localHistory}
-            setLocalHistory={setLocalHistory}
             recommendQuery={recommendQuery}
             setRecommendQuery={setRecommendQuery}
           />
         </div>
       </div>
+      <button
+        onClick={() => setSelectedId(null)}
+        className="text-gray-500 hover:text-gray-700"
+      >
+        Close
+      </button>
     </section>
   );
 };

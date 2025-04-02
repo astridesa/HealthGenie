@@ -183,7 +183,14 @@ def write_history(history):
         content = history["content"]
         time = history["time"]
 
-        logger.info(f"Writing to history.csv: id={id}, type={type}, content={content}")
+        # Only write include/exclude operations to history.csv
+        if type not in ["include", "exclude", "cancel", "apply"]:
+            logger.info(f"Skipping non-operation history: type={type}")
+            return
+
+        logger.info(
+            f"Writing operation to history.csv: id={id}, type={type}, content={content}"
+        )
 
         # Check if file exists and is writable
         if not os.path.exists(history_csv_path):
@@ -194,6 +201,7 @@ def write_history(history):
             logger.error(f"No write permission for history.csv at {history_csv_path}")
             raise PermissionError(f"No write permission for {history_csv_path}")
 
+        # For all operations, just append to the file
         with open(history_csv_path, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([id, type, content, time])
@@ -268,8 +276,23 @@ def write_click_history():
 
         id = data.get("id", "")
         content = data.get("content", "")
-        type = data.get("type", "click")  # Default to 'click' if not specified
+        type = data.get("type", "")
         time = data.get("time", "")
+
+        # Only write include/exclude operations
+        if type not in ["include", "exclude", "cancel", "apply"]:
+            logger.info(f"Rejecting non-operation type: {type}")
+            return jsonify({"message": "Operation type not supported"}), 400
+
+        # Only require content for include/exclude operations
+        if type in ["include", "exclude"] and not content:
+            logger.info("Rejecting empty content for include/exclude operation")
+            return (
+                jsonify(
+                    {"message": "Content is required for include/exclude operations"}
+                ),
+                400,
+            )
 
         print(
             f"Writing history: id={id}, type={type}, content={content}, time={time}"
@@ -279,7 +302,7 @@ def write_click_history():
             {
                 "id": id,
                 "content": content,
-                "type": type,  # Now accepts any type, including 'include' and 'exclude'
+                "type": type,
                 "time": time,
             }
         )
@@ -391,32 +414,108 @@ def recommend():
 
 @app.route("/api/question", methods=["POST"])
 def answer_question():
-    data = request.get_json()
+    try:
+        logger.info("Received question request")
+        data = request.get_json()
+        if not data:
+            logger.error("No JSON data received")
+            return jsonify({"error": "No JSON data received"}), 400
 
-    history = data.get("history", {})
+        question = data.get("question", "")
+        if not question:
+            logger.error("Empty question received")
+            return jsonify({"error": "Question is required"}), 400
 
-    question = data.get("question", "")
+        clicked_node = data.get("clickedNode", None)
+        logger.info(f"Processing question: {question}, clicked_node: {clicked_node}")
 
-    clicked_node = data.get("clickedNode", {})
+        # Extract keywords from the question
+        try:
+            keywords = extract_keywords(question)
+            logger.info(f"Extracted keywords: {keywords}")
+        except Exception as e:
+            logger.error(f"Error extracting keywords: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({"error": f"Failed to extract keywords: {str(e)}"}), 500
 
-    write_history(history)
+        # Search in knowledge graph
+        try:
+            search_result = search_in_kg(nutrition_kg, keywords)
+            logger.info(f"Search result: {search_result}")
+        except Exception as e:
+            logger.error(f"Error searching knowledge graph: {str(e)}")
+            logger.error(traceback.format_exc())
+            return (
+                jsonify({"error": f"Failed to search knowledge graph: {str(e)}"}),
+                500,
+            )
 
-    print(clicked_node)
+        # Generate final answer
+        try:
+            final_answer = generate_final_answer(question, search_result["matches_df"])
+            logger.info(f"Generated answer: {final_answer}")
+        except Exception as e:
+            logger.error(f"Error generating final answer: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({"error": f"Failed to generate answer: {str(e)}"}), 500
 
-    keywords = extract_keywords(question, KEYWORD_SYSTEM_PROMPT)
+        # Convert DataFrame to list of dictionaries for JSON serialization
+        matches_df = search_result["matches_df"]
+        if not matches_df.empty:
+            matches_data = matches_df.to_dict("records")
+        else:
+            matches_data = []
 
-    search_result = search_in_kg(nutrition_kg, keywords)
+        return jsonify(
+            {
+                "finalAnswer": final_answer,
+                "searchResult": {
+                    "nodes": search_result["nodes"],
+                    "edges": search_result["edges"],
+                    "matches": matches_data,
+                },
+                "keywords": keywords,
+            }
+        )
 
-    final_answer = generate_final_answer(question, search_result["matches_df"])
-
-    return jsonify(
-        {
-            "keywords": keywords,
-            "searchResult": search_result["nodes"],
-            "finalAnswer": final_answer,
-        }
-    )
+    except Exception as e:
+        logger.error(f"Unexpected error in answer_question: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
 
+def test_azure_connection():
+    try:
+        logger.info("Testing Azure OpenAI API connection...")
+        logger.info(f"Using endpoint: {endpoint}")
+        logger.info(f"Using deployment: {deployment}")
+        logger.info(f"Using API version: {openai.api_version}")
+
+        # Try a simple completion to test the connection
+        response = openai.ChatCompletion.create(
+            engine=deployment,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello, this is a test message."},
+            ],
+            max_tokens=10,
+            temperature=0.0,
+        )
+
+        logger.info("Azure OpenAI API connection successful!")
+        logger.info(f"Response: {response['choices'][0]['message']['content']}")
+        return True
+    except Exception as e:
+        logger.error(f"Azure OpenAI API connection failed: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error traceback: {traceback.format_exc()}")
+        return False
+
+
+# Test connection when server starts
 if __name__ == "__main__":
+    if not test_azure_connection():
+        logger.error(
+            "Failed to connect to Azure OpenAI API. Server will start but API calls may fail."
+        )
     app.run(host="0.0.0.0", port=5001, debug=True)

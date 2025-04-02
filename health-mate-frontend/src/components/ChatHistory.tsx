@@ -5,10 +5,15 @@ const ChatHistory = ({ localHistory, setCurrentHistory }: any) => {
     setCurrentHistory(id);
   };
 
+  // Filter out operation history (include/exclude/cancel/apply)
+  const chatHistory = localHistory.filter((history: any) => 
+    history.type === "chat" || history.type === "recommendation"
+  );
+
   return (
     <ul className="space-y-4 text-sm text-gray-700 h-[450px] overflow-auto">
-      {localHistory.length > 0 &&
-        localHistory.map((history: any, index: any) => (
+      {chatHistory.length > 0 &&
+        chatHistory.map((history: any, index: any) => (
           <li
             key={history.time}
             className="p-4 bg-white rounded-lg shadow-sm hover:shadow-md cursor-pointer transition duration-200"
@@ -16,7 +21,7 @@ const ChatHistory = ({ localHistory, setCurrentHistory }: any) => {
           >
             <div className="text-xs text-[#a6a6a6]">{history.time}</div>
             <div className="text-[#292929] font-semibold line-clamp-3">
-              {history.title ? history.title : `History ${history.id}`}
+              {history.content}
             </div>
           </li>
         ))}

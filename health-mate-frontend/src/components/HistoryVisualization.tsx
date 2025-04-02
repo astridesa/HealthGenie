@@ -67,7 +67,7 @@ const applyHistory = async (userId: string) => {
 
 const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId }) => {
   // Fetch history from server
-  const { data: serverHistory, refetch } = useQuery({
+  const { data: serverHistory } = useQuery({
     queryKey: ['history', localUserId],
     queryFn: () => fetchHistory(localUserId),
     enabled: !!localUserId,
@@ -76,47 +76,58 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
   // Update local history when server history changes
   useEffect(() => {
     if (serverHistory) {
-      // Filter out any cancelled operations
-      const filteredHistory = serverHistory.filter((item: HistoryItem) => 
-        item.type === 'include' || item.type === 'exclude'
-      );
+      // Filter out any operations that are not include/exclude
+      const filteredHistory = serverHistory
+        .filter((item: HistoryItem) => 
+          item.type === 'include' || item.type === 'exclude'
+        )
+        .map((item: HistoryItem) => ({
+          ...item,
+          time: new Date(item.time).toISOString()
+        }));
+
+      // Update local history with filtered operations
       setLocalHistory(filteredHistory);
     }
   }, [serverHistory, setLocalHistory]);
 
-  const operations = localHistory.map((item: HistoryItem) => ({
-    type: item.type,
-    content: item.content,
-    time: item.time
-  }));
+  // Map operations for display
+  const operations = localHistory
+    .filter((item: HistoryItem) => item.type === 'include' || item.type === 'exclude')
+    .map((item: HistoryItem) => ({
+      type: item.type,
+      content: item.content,
+      time: item.time
+    }));
 
   const mutation = useMutation({
     mutationFn: () => deleteLastHistory(localUserId),
     onSuccess: () => {
-      // Refetch from server to ensure consistency
-      refetch();
+      // Update local history after successful server response
+      const newHistory = localHistory.filter((_, index) => index < localHistory.length - 1);
+      setLocalHistory(newHistory);
     },
   });
 
   const applyMutation = useMutation({
     mutationFn: () => applyHistory(localUserId),
     onSuccess: () => {
-      // Clear local history
+      // Just clear the local history
       setLocalHistory([]);
-      // Refetch from server to ensure consistency
-      refetch();
     },
   });
 
   const handleCancel = () => {
     if (operations.length > 0) {
-      // Update local history immediately
-      const newHistory = localHistory.slice(0, -1);
-      setLocalHistory(newHistory);
-      
-      // Then send request to server
       mutation.mutate();
     }
+  };
+
+  const handleApply = () => {
+    // Clear local history immediately
+    setLocalHistory([]);
+    // Then trigger the mutation
+    applyMutation.mutate();
   };
 
   return (
@@ -128,13 +139,14 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
               Here is the operation record panel
             </div>
           ) : (
-            <AnimatePresence>
+            <AnimatePresence mode="popLayout">
               {operations.map((op, index) => (
                 <motion.div
                   key={`${op.time}-${index}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={{ duration: 0.15 }}
                   className="flex items-center space-x-1.5 px-1.5 py-0.5"
                 >
                   <span className={`px-1.5 py-0.5 rounded text-sm ${
@@ -160,9 +172,7 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
           Cancel Last
         </button>
         <button
-          onClick={() => {
-            applyMutation.mutate();
-          }}
+          onClick={handleApply}
           disabled={applyMutation.isPending || operations.length === 0}
           className={`px-3 py-1.5 text-sm font-medium text-green-600 bg-green-50 rounded-md hover:bg-green-100 transition-colors shadow-sm ${
             (applyMutation.isPending || operations.length === 0) ? 'opacity-50 cursor-not-allowed' : ''
