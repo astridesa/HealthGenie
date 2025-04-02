@@ -117,6 +117,29 @@ const sendQuestion = async ({ inputValue, clickedNode }: any) => {
   }
 };
 
+const writeChatToHistory = async (content: string, type: string, localUserId: string) => {
+  try {
+    const response = await fetch(`${SERVER_URL}/api/history`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: localUserId,
+        type: type,
+        content: content,
+        time: new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to write chat history");
+    }
+  } catch (error) {
+    console.error("Error writing chat history:", error);
+  }
+};
+
 const ContentPanel: React.FC<ContentPanelProps> = ({
   data,
   selectedId,
@@ -163,7 +186,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
 
   const mutation = useMutation({
     mutationFn: sendQuestion,
-    onSuccess: (successData) => {
+    onSuccess: async (successData) => {
       const { finalAnswer, searchResult, keywords } = successData;
 
       const answer = {
@@ -173,6 +196,10 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
       };
 
       setChats([...chats, answer]);
+
+      // Write both user message and bot response to history
+      await writeChatToHistory(userInput, "chat", localUserId);
+      await writeChatToHistory(finalAnswer, "chat", localUserId);
 
       const targetIds = data.nodes
         .filter((node: any) => {
@@ -210,7 +237,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
       setSelectedId(null);
       setClickedNode(null);
     },
-    onError: (error: any) => {
+    onError: async (error: any) => {
       console.error("Error:", error);
       // Add error message to chat
       const errorMessage = {
@@ -219,6 +246,11 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         id: uuidv4(),
       };
       setChats([...chats, errorMessage]);
+      
+      // Write both user message and error response to history
+      await writeChatToHistory(userInput, "chat", localUserId);
+      await writeChatToHistory(errorMessage.content, "chat", localUserId);
+      
       setWaitingReponse(false);
       setUserInput("");
     },
