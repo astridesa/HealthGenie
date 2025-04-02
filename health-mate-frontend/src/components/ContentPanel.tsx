@@ -7,9 +7,9 @@ import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "../constant/server";
 import Selector from "./Selector";
 
-const sendRecommendationHistory = async (currentHistory: string) => {
+const sendRecommendationHistory = async (currentHistory: string, localUserId: string) => {
   try {
-    console.log("Sending recommendation history with currentHistory:", currentHistory); // Debug log
+    console.log("Sending recommendation history with userId:", localUserId); // Debug log
     const response = await fetch(`${SERVER_URL}/api/history`, {
       method: "POST",
       headers: {
@@ -18,7 +18,7 @@ const sendRecommendationHistory = async (currentHistory: string) => {
       },
       credentials: "include",
       body: JSON.stringify({
-        id: currentHistory,
+        id: localUserId,
         content: "Get personalized recommendation",
         type: "recommendation",
         time: new Date().toISOString(),
@@ -219,7 +219,7 @@ const ContentPanel = ({
 
   const handleRecommendationClick = async () => {
     try {
-      await sendRecommendationHistory(currentHistory);
+      await sendRecommendationHistory(currentHistory, localUserId);
       // Add any additional recommendation logic here
     } catch (error) {
       console.error("Error recording recommendation:", error);

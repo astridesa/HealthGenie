@@ -33,13 +33,16 @@ interface VisualizationProps {
   localUserId: string;
 }
 
-const sendClickHistory = async (history: any) => {
+const sendClickHistory = async (history: any, localUserId: string) => {
   const response = await fetch(`${SERVER_URL}/api/history`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(history),
+    body: JSON.stringify({
+      ...history,
+      id: localUserId,
+    }),
   });
 
   if (!response.ok) {
@@ -55,7 +58,7 @@ const Visualization = (props: VisualizationProps) => {
   const width = 700;
 
   const mutation = useMutation({
-    mutationFn: sendClickHistory,
+    mutationFn: (history: any) => sendClickHistory(history, props.localUserId),
   });
 
   const [tooltipProps, setTooltipProps] = useState<{
@@ -126,6 +129,7 @@ const Visualization = (props: VisualizationProps) => {
             id: props.localUserId,
             content: d.name,
             time: new Date().toISOString(),
+            type: "click"
           });
           setTooltipProps({
             x: event.offsetX,
@@ -480,6 +484,7 @@ const Visualization = (props: VisualizationProps) => {
                 id: props.localUserId,
                 content: d.name,
                 time: new Date().toISOString(),
+                type: "click"
               });
               setTooltipProps({
                 x: event.offsetX,
@@ -775,6 +780,7 @@ const Visualization = (props: VisualizationProps) => {
           currentHistory={props.currentHistory}
           localHistory={props.localHistory}
           setLocalHistory={props.setLocalHistory}
+          localUserId={props.localUserId}
         />
       )}
 

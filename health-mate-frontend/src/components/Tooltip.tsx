@@ -16,9 +16,10 @@ interface TooltipProps {
   currentHistory: string;
   localHistory: any[];
   setLocalHistory: (history: any[]) => void;
+  localUserId: string;
 }
 
-const includeRecipe = async ({ nodeName, type, currentHistory }: any) => {
+const includeRecipe = async ({ nodeName, type, currentHistory, localUserId }: any) => {
   // First send the include/exclude information to history
   await fetch(`${SERVER_URL}/api/history`, {
     method: "POST",
@@ -26,7 +27,7 @@ const includeRecipe = async ({ nodeName, type, currentHistory }: any) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      id: currentHistory,
+      id: localUserId,
       content: nodeName,
       type: type,
       time: new Date().toISOString(),
@@ -66,6 +67,7 @@ const NodeTooltip = ({
   currentHistory,
   localHistory,
   setLocalHistory,
+  localUserId,
 }: TooltipProps) => {
   const mutation = useMutation({
     mutationFn: includeRecipe,
@@ -132,13 +134,13 @@ const NodeTooltip = ({
       </div>
       <div className="flex flex-col items-center w-full">
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "include", currentHistory })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "include", currentHistory, localUserId })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
         >
           Include
         </button>
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", currentHistory })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", currentHistory, localUserId })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
         >
           Exclude
