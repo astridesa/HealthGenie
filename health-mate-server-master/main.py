@@ -284,8 +284,26 @@ def delete_last_history():
         if len(rows) <= 1:  # Only header row
             return jsonify({"status": "error", "message": "No history to delete"}), 404
 
-        # Remove the last row (excluding header)
-        rows.pop()
+        # Find the last include/exclude record from the end
+        last_include_exclude_index = -1
+        for i in range(len(rows) - 1, 0, -1):  # Skip header row
+            if rows[i][0] in ["include", "exclude"]:  # Check type column
+                last_include_exclude_index = i
+                break
+
+        if last_include_exclude_index == -1:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "No include/exclude records to delete",
+                    }
+                ),
+                404,
+            )
+
+        # Remove the last include/exclude record
+        rows.pop(last_include_exclude_index)
 
         # Write back to file
         with open(user_history_path, mode="w", newline="", encoding="utf-8") as file:

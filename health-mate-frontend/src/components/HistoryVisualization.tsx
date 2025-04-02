@@ -122,7 +122,9 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
   });
 
   const handleCancel = () => {
-    if (operations.length > 0) {
+    // Only trigger delete if there are include/exclude operations
+    const hasIncludeExcludeOps = operations.some(op => op.type === 'include' || op.type === 'exclude');
+    if (hasIncludeExcludeOps) {
       mutation.mutate();
     }
   };
