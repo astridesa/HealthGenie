@@ -19,8 +19,8 @@ interface TooltipProps {
   localUserId: string;
 }
 
-const includeRecipe = async ({ nodeName, type, currentHistory, localUserId }: any) => {
-  // First send the include/exclude information to history
+const includeRecipe = async ({ nodeName, type, currentHistory, localUserId, localHistory, setLocalHistory }: any) => {
+  // Only send the include/exclude information to history
   await fetch(`${SERVER_URL}/api/history`, {
     method: "POST",
     headers: {
@@ -34,25 +34,15 @@ const includeRecipe = async ({ nodeName, type, currentHistory, localUserId }: an
     }),
   });
 
-  // Then make the recommend API call
-  console.log("Sending request to /api/recommend with:", { nodeName, type });
-  const response = await fetch(`${SERVER_URL}/api/recommend`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      nodeName,
-      type,
-    }),
+  // Update local history without triggering a new message
+  const newHistory = [...localHistory];
+  newHistory.push({
+    id: localUserId,
+    content: nodeName,
+    type: type,
+    time: new Date().toISOString(),
   });
-  if (!response.ok) {
-    throw new Error("Network response was not ok");
-  }
-
-  const data = await response.json();
-  console.log("Received response:", data);
-  return data;
+  setLocalHistory(newHistory);
 };
 
 const NodeTooltip = ({
@@ -71,47 +61,8 @@ const NodeTooltip = ({
 }: TooltipProps) => {
   const mutation = useMutation({
     mutationFn: includeRecipe,
-    onSuccess: (successData) => {
-      const { finalAnswer, recommendQuery, nodes, links } = successData;
-      
-      // Add new chat message
-      const newChat = {
-        from: "bot",
-        content: finalAnswer,
-        id: uuidv4(),
-      };
-      
-      setChats((prevChats: any) => [...prevChats, newChat]);
-      
-      // Update recommend query
-      setRecommendQuery(recommendQuery);
-      
-      // Update visualization
-      if (nodes && links) {
-        setVisData({ nodes, links });
-      }
-      
-      // Update history in localStorage
-      const updatedHistory = localHistory.map((history: any) => {
-        if (history.id === currentHistory) {
-          return {
-            ...history,
-            chats: [...history.chats, newChat],
-          };
-        }
-        return history;
-      });
-      
-      setLocalHistory(updatedHistory);
-      localStorage.setItem("history", JSON.stringify(updatedHistory));
-      
-      // Close tooltip
-      setTooltipProps(null);
-    },
-    onError: (error) => {
-      console.error("Mutation error:", error);
-    }
   });
+
   return (
     <div
       className="absolute bg-white shadow-lg rounded-xs w-48 border border-[#f3c4f4] rounded-lg flex flex-col items-center z-50 p-3"
@@ -134,13 +85,13 @@ const NodeTooltip = ({
       </div>
       <div className="flex flex-col items-center w-full">
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "include", currentHistory, localUserId })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "include", currentHistory, localUserId, localHistory, setLocalHistory })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
         >
           Include
         </button>
         <button
-          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", currentHistory, localUserId })}
+          onClick={() => mutation.mutate({ nodeName: title, type: "exclude", currentHistory, localUserId, localHistory, setLocalHistory })}
           className="w-full py-1 my-1 text-sm bg-[#f9f5f9] text-[#6d6d6d] rounded-lg shadow-sm hover:bg-[#c084fc] transition-all border border-[#f3c4f4]"
         >
           Exclude

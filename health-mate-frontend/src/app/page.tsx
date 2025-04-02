@@ -11,6 +11,9 @@ import {
 } from "../utils/utils";
 import SideBar from "../components/Sidebar";
 import { v4 as uuidv4 } from "uuid";
+import HistoryVisualization from "../components/HistoryVisualization";
+import ChatInput from "../components/ChatInput";
+import NodeTooltip from "../components/Tooltip";
 
 interface HistoryItem {
   id: string;
@@ -52,6 +55,10 @@ const App = () => {
   const [relatedNodes, setRelatedNodes] = useState<any>([]);
 
   const [recommendQuery, setRecommendQuery] = useState<string>("");
+
+  const [tooltipProps, setTooltipProps] = useState<any>(null);
+
+  const [graphHeight, setGraphHeight] = useState(80); // percentage of viewport height
 
   const handleClickedNode = useCallback((clickedNode: number) => {
     const node = nodes.find((node: any) => node.id === clickedNode);
@@ -205,9 +212,28 @@ const App = () => {
     setRelatedNodes(generateSelectedDataset(nodeId, DATA_SOURCE));
   };
 
+  const handleDrag = (e: React.MouseEvent) => {
+    const startY = e.clientY;
+    const startHeight = graphHeight;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = e.clientY - startY;
+      const newHeight = Math.max(20, Math.min(90, startHeight + (deltaY / window.innerHeight) * 100));
+      setGraphHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
   return (
-    <section className="m-1 pb-2 rounded-xl border-4">
-      <div className="flex flex-row justify-start w-full">
+    <section className="m-1 pb-2 rounded-xl border-4 h-screen overflow-hidden">
+      <div className="flex flex-row justify-start w-full h-full">
         <SideBar
           userId={localUserId}
           localHistory={localHistory}
@@ -215,25 +241,40 @@ const App = () => {
           setCurrentHistory={setCurrentHistory}
         />
 
-        <Visualization
-          visData={visData}
-          setVisData={setVisData}
-          setChats={setChats}
-          setRecommendQuery={setRecommendQuery}
-          currentHistory={currentHistory}
-          localHistory={localHistory}
-          setLocalHistory={setLocalHistory}
-          isOverview={isOverview}
-          selectedId={selectedId}
-          keywordNodes={keywordNodes}
-          handleClickedNode={handleClickedNode}
-          clickedNode={clickedNode}
-          addSlideBarChat={addSlideBarChat}
-          showRelatedNode={showRelatedNode}
-          slideValue={slideValue}
-          cancel={cancel}
-          localUserId={localUserId}
-        />
+        <div className="flex-1 flex flex-col h-full">
+          <div className="relative" style={{ height: `${graphHeight}%` }}>
+            <Visualization
+              visData={visData}
+              setVisData={setVisData}
+              setChats={setChats}
+              setRecommendQuery={setRecommendQuery}
+              currentHistory={currentHistory}
+              localHistory={localHistory}
+              setLocalHistory={setLocalHistory}
+              isOverview={isOverview}
+              selectedId={selectedId}
+              keywordNodes={keywordNodes}
+              handleClickedNode={handleClickedNode}
+              clickedNode={clickedNode}
+              addSlideBarChat={addSlideBarChat}
+              showRelatedNode={showRelatedNode}
+              slideValue={slideValue}
+              cancel={cancel}
+              localUserId={localUserId}
+            />
+            <div 
+              className="absolute bottom-0 left-0 right-0 h-1 bg-gray-300 cursor-ns-resize hover:bg-gray-400 transition-colors"
+              onMouseDown={handleDrag}
+            />
+          </div>
+          <div className="flex-1 overflow-hidden min-h-0">
+            <HistoryVisualization 
+              localHistory={localHistory} 
+              setLocalHistory={setLocalHistory}
+              localUserId={localUserId}
+            />
+          </div>
+        </div>
 
         <ContentPanel
           data={DATA_SOURCE}
@@ -242,7 +283,6 @@ const App = () => {
           setSelectedId={setSelectedId}
           clickedNode={clickedNode}
           setClickedNode={setClickedNode}
-          currentHistory={currentHistory}
           localHistory={localHistory}
           setLocalHistory={setLocalHistory}
           chats={chats}
@@ -256,7 +296,19 @@ const App = () => {
         />
       </div>
 
-      {/* </Box> */}
+      {tooltipProps && (
+        <NodeTooltip
+          {...tooltipProps}
+          setTooltipProps={setTooltipProps}
+          setChats={setChats}
+          setRecommendQuery={setRecommendQuery}
+          setVisData={setVisData}
+          currentHistory={currentHistory}
+          localHistory={localHistory}
+          setLocalHistory={setLocalHistory}
+          localUserId={localUserId}
+        />
+      )}
     </section>
   );
 };
