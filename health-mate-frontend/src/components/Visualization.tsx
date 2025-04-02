@@ -12,6 +12,20 @@ import PreferenceSelector from "./PreferenceSelector";
 import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "@/constant/server";
 import { colors, getCategoryColor } from "@/constant/colors";
+import { ChatSession } from "../types/chat";
+
+interface TooltipProps {
+  x: number;
+  y: number;
+  title: string;
+  content: string;
+  setTooltipProps: (props: any) => void;
+  setVisData: (data: any) => void;
+  currentHistory: string;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
+  localUserId: string;
+}
 
 interface VisualizationProps {
   visData: any;
@@ -19,8 +33,8 @@ interface VisualizationProps {
   setChats: (chats: any) => void;
   setRecommendQuery: (query: string) => void;
   currentHistory: string;
-  localHistory: any[];
-  setLocalHistory: (history: any[]) => void;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   isOverview: boolean;
   selectedId: number | null;
   keywordNodes: number[];
@@ -33,7 +47,7 @@ interface VisualizationProps {
   localUserId: string;
 }
 
-const sendClickHistory = async (history: any, localUserId: string) => {
+const sendClickHistory = async (history: ChatSession, localUserId: string) => {
   const response = await fetch(`${SERVER_URL}/api/history`, {
     method: "POST",
     headers: {
@@ -58,15 +72,10 @@ const Visualization = (props: VisualizationProps) => {
   const width = 700;
 
   const mutation = useMutation({
-    mutationFn: (history: any) => sendClickHistory(history, props.localUserId),
+    mutationFn: (history: ChatSession) => sendClickHistory(history, props.localUserId),
   });
 
-  const [tooltipProps, setTooltipProps] = useState<{
-    x: number;
-    y: number;
-    title: string;
-    content: string;
-  } | null>(null);
+  const [tooltipProps, setTooltipProps] = useState<TooltipProps | null>(null);
 
   const height = 700;
 
@@ -129,13 +138,20 @@ const Visualization = (props: VisualizationProps) => {
             id: props.localUserId,
             content: d.name,
             time: new Date().toISOString(),
-            type: "click"
+            type: "click",
+            chats: []
           });
           setTooltipProps({
             x: event.offsetX,
             y: event.offsetY,
             title: d.name,
             content: d.name,
+            setTooltipProps,
+            setVisData: props.setVisData,
+            currentHistory: props.currentHistory,
+            localHistory: props.localHistory,
+            setLocalHistory: props.setLocalHistory,
+            localUserId: props.localUserId
           });
         } else {
           console.log("Invalid or no category");
@@ -484,13 +500,20 @@ const Visualization = (props: VisualizationProps) => {
                 id: props.localUserId,
                 content: d.name,
                 time: new Date().toISOString(),
-                type: "click"
+                type: "click",
+                chats: []
               });
               setTooltipProps({
                 x: event.offsetX,
                 y: event.offsetY,
                 title: d.name,
                 content: d.name,
+                setTooltipProps,
+                setVisData: props.setVisData,
+                currentHistory: props.currentHistory,
+                localHistory: props.localHistory,
+                setLocalHistory: props.setLocalHistory,
+                localUserId: props.localUserId
               });
             } else {
               console.log("Invalid or no category");
@@ -774,8 +797,6 @@ const Visualization = (props: VisualizationProps) => {
         <NodeTooltip
           {...tooltipProps}
           setTooltipProps={setTooltipProps}
-          setChats={props.setChats}
-          setRecommendQuery={props.setRecommendQuery}
           setVisData={props.setVisData}
           currentHistory={props.currentHistory}
           localHistory={props.localHistory}

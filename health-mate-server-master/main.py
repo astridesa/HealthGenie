@@ -7,6 +7,7 @@ from flask_cors import CORS
 import csv
 import logging
 import traceback
+from pathlib import Path
 
 from nutrition import NutritionKG
 
@@ -156,24 +157,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get absolute path for history.csv
-current_dir = os.path.dirname(os.path.abspath(__file__))
-history_csv_path = os.path.join(current_dir, "history.csv")
-logger.info(f"Server started. Current directory: {current_dir}")
-logger.info(f"History CSV path: {history_csv_path}")
+# Define paths
+HISTORY_DIR = "history"
+history_dir_path = Path(HISTORY_DIR)
 
-# Ensure history.csv exists with proper headers
-if not os.path.exists(history_csv_path):
-    try:
-        with open(history_csv_path, mode="w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file)
-            writer.writerow(["id", "type", "content", "time"])
-        logger.info(f"Created new history.csv at {history_csv_path}")
-    except Exception as e:
-        logger.error(f"Failed to create history.csv: {str(e)}")
-        raise
-else:
-    logger.info(f"Found existing history.csv at {history_csv_path}")
+
+def get_user_history_path(user_id: str) -> Path:
+    """Get the path to a user's history file."""
+    # Ensure history directory exists
+    history_dir_path.mkdir(exist_ok=True)
+    return history_dir_path / f"{user_id}.csv"
 
 
 def write_history(history):
@@ -189,38 +182,40 @@ def write_history(history):
             return
 
         logger.info(
-            f"Writing operation to history.csv: id={id}, type={type}, content={content}"
+            f"Writing operation to user history file: id={id}, type={type}, content={content}"
         )
 
-        # Check if file exists and is writable
-        if not os.path.exists(history_csv_path):
-            logger.error(f"history.csv does not exist at {history_csv_path}")
-            raise FileNotFoundError(f"history.csv not found at {history_csv_path}")
+        # Get user's history file path
+        user_history_path = get_user_history_path(id)
 
-        if not os.access(history_csv_path, os.W_OK):
-            logger.error(f"No write permission for history.csv at {history_csv_path}")
-            raise PermissionError(f"No write permission for {history_csv_path}")
+        # Create file with headers if it doesn't exist
+        if not user_history_path.exists():
+            with open(user_history_path, mode="w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["type", "content", "time"])
 
-        # For all operations, just append to the file
-        with open(history_csv_path, mode="a", newline="", encoding="utf-8") as f:
+        # Append the new record
+        with open(user_history_path, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([id, type, content, time])
+            writer.writerow([type, content, time])
 
-        logger.info("Successfully wrote to history.csv")
+        logger.info(f"Successfully wrote to {user_history_path}")
     except Exception as e:
-        logger.error(f"Error writing to history.csv: {str(e)}")
+        logger.error(f"Error writing to history file: {str(e)}")
         raise
 
 
 def read_history_with_cancellations(user_id: str) -> list:
     """Read history and handle cancellations by removing cancelled include/exclude operations."""
     try:
-        if not os.path.exists(history_csv_path):
-            logger.error(f"history.csv does not exist at {history_csv_path}")
+        user_history_path = get_user_history_path(user_id)
+
+        if not user_history_path.exists():
+            logger.info(f"No history file found for user {user_id}")
             return []
 
         # Read all records
-        with open(history_csv_path, mode="r", newline="", encoding="utf-8") as file:
+        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
             reader = csv.reader(file)
             rows = list(reader)
 
@@ -235,31 +230,22 @@ def read_history_with_cancellations(user_id: str) -> list:
         skip_count = 0
 
         for row in reversed(history_rows):
-            if row[0] == user_id:
-                if row[1] == "cancel":
-                    # Increment skip count for each cancel record
-                    skip_count += 1
+            if row[0] == "cancel":
+                # Increment skip count for each cancel record
+                skip_count += 1
+                continue
+            elif row[0] in ["include", "exclude"]:
+                if skip_count > 0:
+                    # Skip this record if we have pending cancellations
+                    skip_count -= 1
                     continue
-                elif row[1] in ["include", "exclude"]:
-                    if skip_count > 0:
-                        # Skip this record if we have pending cancellations
-                        skip_count -= 1
-                        continue
-                    # Format the row as a history item object
-                    result.append(
-                        {
-                            "id": row[0],
-                            "type": row[1],
-                            "content": row[2],
-                            "time": row[3],
-                        }
-                    )
+                # Format the row as a history item object
+                result.append({"type": row[0], "content": row[1], "time": row[2]})
 
-        # Reverse back to chronological order
+        # Reverse the result to get chronological order
         return list(reversed(result))
-
     except Exception as e:
-        logger.error(f"Error reading history with cancellations: {str(e)}")
+        logger.error(f"Error reading history file: {str(e)}")
         return []
 
 
@@ -271,132 +257,59 @@ def index():
 @app.route("/api/history", methods=["POST"])
 def write_click_history():
     try:
-        data = request.get_json()
-        print("Received data:", data)  # Debug log
-
-        id = data.get("id", "")
-        content = data.get("content", "")
-        type = data.get("type", "")
-        time = data.get("time", "")
-
-        # Accept include/exclude/cancel/apply/chat operations
-        if type not in ["include", "exclude", "cancel", "apply", "chat"]:
-            logger.info(f"Rejecting non-operation type: {type}")
-            return jsonify({"message": "Operation type not supported"}), 400
-
-        # Only require content for include/exclude operations
-        if type in ["include", "exclude"] and not content:
-            logger.info("Rejecting empty content for include/exclude operation")
-            return (
-                jsonify(
-                    {"message": "Content is required for include/exclude operations"}
-                ),
-                400,
-            )
-
-        print(
-            f"Writing history: id={id}, type={type}, content={content}, time={time}"
-        )  # Debug log
-
-        write_history(
-            {
-                "id": id,
-                "content": content,
-                "type": type,
-                "time": time,
-            }
-        )
-        return jsonify({"message": "记录成功"})
+        history = request.json
+        write_history(history)
+        return jsonify({"status": "success"})
     except Exception as e:
-        print("Error in write_click_history:", str(e))  # Error log
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error in write_click_history: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/history", methods=["DELETE"])
 def delete_last_history():
     try:
-        data = request.get_json()
-        user_id = data.get("id", "")
-        current_time = data.get("time", "")
+        user_id = request.json.get("id")
+        if not user_id:
+            return jsonify({"status": "error", "message": "No user ID provided"}), 400
 
-        logger.info(f"Attempting to delete last history for user: {user_id}")
-        logger.info(f"Request data: {data}")
-        logger.info(f"Request headers: {dict(request.headers)}")
+        user_history_path = get_user_history_path(user_id)
+        if not user_history_path.exists():
+            return jsonify({"status": "error", "message": "No history found"}), 404
 
-        # Check if file exists and is writable
-        if not os.path.exists(history_csv_path):
-            logger.error(f"history.csv does not exist at {history_csv_path}")
-            raise FileNotFoundError(f"history.csv not found at {history_csv_path}")
-
-        if not os.access(history_csv_path, os.W_OK):
-            logger.error(f"No write permission for history.csv at {history_csv_path}")
-            raise PermissionError(f"No write permission for {history_csv_path}")
-
-        # Read all records from history.csv
-        with open(history_csv_path, mode="r", newline="", encoding="utf-8") as file:
+        # Read all records
+        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
             reader = csv.reader(file)
             rows = list(reader)
 
-        logger.info(f"Read {len(rows)} rows from history.csv")
-        logger.info(f"Last few rows: {rows[-5:]}")  # Log the last 5 rows
+        if len(rows) <= 1:  # Only header row
+            return jsonify({"status": "error", "message": "No history to delete"}), 404
 
-        # Find the last include/exclude record for this user
-        last_operation_index = -1
-        last_operation_type = ""
-        last_operation_content = ""
-        for i in range(len(rows) - 1, 0, -1):  # Skip header row
-            if rows[i][0] == user_id and (
-                rows[i][1] == "include" or rows[i][1] == "exclude"
-            ):
-                last_operation_index = i
-                last_operation_type = rows[i][1]
-                last_operation_content = rows[i][2]
-                logger.info(f"Found last operation at index {i}: {rows[i]}")
-                break
+        # Remove the last row (excluding header)
+        rows.pop()
 
-        if last_operation_index != -1:
-            # Add a cancel record with the content of the deleted record
-            cancel_record = [
-                user_id,
-                "cancel",
-                f"{last_operation_type}-{last_operation_content}",
-                current_time,
-            ]
-            rows.append(cancel_record)
-            logger.info(f"Added cancel record: {cancel_record}")
+        # Write back to file
+        with open(user_history_path, mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerows(rows)
 
-            # Write back to file
-            with open(history_csv_path, mode="w", newline="", encoding="utf-8") as file:
-                writer = csv.writer(file)
-                writer.writerows(rows)
-
-            logger.info(f"Successfully updated history.csv. New row count: {len(rows)}")
-            logger.info(
-                f"Last few rows after update: {rows[-5:]}"
-            )  # Log the last 5 rows after update
-        else:
-            logger.info("No matching record found to delete")
-
-        return jsonify({"message": "删除成功"})
+        return jsonify({"status": "success"})
     except Exception as e:
         logger.error(f"Error in delete_last_history: {str(e)}")
-        logger.error(f"Error type: {type(e)}")
-        logger.error(f"Error traceback: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/history", methods=["GET"])
 def get_history():
     try:
-        user_id = request.args.get("id", "")
+        user_id = request.args.get("id")
         if not user_id:
-            return jsonify({"error": "User ID is required"}), 400
+            return jsonify({"status": "error", "message": "No user ID provided"}), 400
 
         history = read_history_with_cancellations(user_id)
-        return jsonify({"history": history})
+        return jsonify({"status": "success", "history": history})
     except Exception as e:
-        logger.error(f"Error getting history: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error in get_history: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/recommend", methods=["POST"])

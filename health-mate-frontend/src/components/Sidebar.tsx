@@ -6,11 +6,12 @@ import AccountCircleIcon from "@mui/icons-material/AccountCircle";
 import { v4 as uuidv4 } from "uuid";
 import { SERVER_URL } from "../constant/server";
 import AddIcon from "@mui/icons-material/Add";
+import { ChatSession } from "../types/chat";
 
 interface SidebarProps {
   userId: string;
-  localHistory: any[];
-  setLocalHistory: (history: any[]) => void;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   setCurrentHistory: (id: string) => void;
   onClearVisualization: () => void;
 }
@@ -24,8 +25,8 @@ export default function Sidebar({
 }: SidebarProps) {
   const [enabled, setEnabled] = useState(true);
 
-  const handleNewSession = () => {
-    const newSession = {
+  const handleNewSession = async () => {
+    const newSession: ChatSession = {
       id: uuidv4(),
       type: "chat",
       content: "New chat session",
@@ -33,8 +34,34 @@ export default function Sidebar({
       chats: []
     };
     
-    // Clear all history and set only the new session
-    setLocalHistory([newSession]);
+    // Write the new session to history file
+    try {
+      const response = await fetch(`${SERVER_URL}/api/history`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...newSession,
+          id: userId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to write history");
+      }
+    } catch (error) {
+      console.error("Error writing history:", error);
+    }
+    
+    // Add the new session to existing history instead of replacing it
+    setLocalHistory((prevHistory: ChatSession[]) => {
+      // Filter out all non-chat operations (include/exclude/cancel/apply)
+      const chatSessions = prevHistory.filter(item => 
+        item.type === "chat" || item.type === "recommendation"
+      );
+      return [...chatSessions, newSession];
+    });
     setCurrentHistory(newSession.id);
     onClearVisualization();
   };
@@ -72,7 +99,6 @@ export default function Sidebar({
             setCurrentHistory={setCurrentHistory}
             localUserId={userId}
             setLocalHistory={setLocalHistory}
-            onNewChat={handleNewSession}
           />
         </div>
       </div>

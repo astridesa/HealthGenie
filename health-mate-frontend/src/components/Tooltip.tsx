@@ -3,6 +3,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "@/constant/server";
 import { v4 as uuidv4 } from "uuid";
+import { ChatSession } from "../types/chat";
 
 interface TooltipProps {
   x: number;
@@ -12,8 +13,8 @@ interface TooltipProps {
   setTooltipProps: (props: any) => void;
   setVisData: (data: any) => void;
   currentHistory: string;
-  localHistory: any[];
-  setLocalHistory: (history: any[]) => void;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   localUserId: string;
 }
 
@@ -30,6 +31,7 @@ const includeRecipe = async ({ nodeName, type, localUserId, localHistory, setLoc
         content: nodeName,
         type: type,
         time: new Date().toISOString(),
+        chats: []
       }),
     });
 
@@ -44,6 +46,7 @@ const includeRecipe = async ({ nodeName, type, localUserId, localHistory, setLoc
       content: nodeName,
       type: type,
       time: new Date().toISOString(),
+      chats: []
     });
     setLocalHistory(newHistory);
   } catch (error) {

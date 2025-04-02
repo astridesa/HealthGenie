@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { SERVER_URL } from '@/constant/server';
+import { ChatSession } from "../types/chat";
 
 interface HistoryItem {
   id: string;
@@ -11,8 +12,8 @@ interface HistoryItem {
 }
 
 interface HistoryVisualizationProps {
-  localHistory: HistoryItem[];
-  setLocalHistory: (history: HistoryItem[]) => void;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   localUserId: string;
 }
 

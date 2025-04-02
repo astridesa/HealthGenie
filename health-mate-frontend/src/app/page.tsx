@@ -14,14 +14,14 @@ import { v4 as uuidv4 } from "uuid";
 import HistoryVisualization from "@/components/HistoryVisualization";
 import ChatInput from "@/components/ChatInput";
 import NodeTooltip from "@/components/Tooltip";
+import { ChatSession } from "@/types/chat";
 
 interface HistoryItem {
   id: string;
   type: string;
   content: string;
   time: string;
-  title?: string;
-  chats?: any[];
+  chats: any[];
 }
 
 const App = () => {
@@ -35,7 +35,7 @@ const App = () => {
 
   const [localUserId, setLocalUserId] = useState<string>("");
 
-  const [localHistory, setLocalHistory] = useState<HistoryItem[]>([]);
+  const [localHistory, setLocalHistory] = useState<ChatSession[]>([]);
 
   const [currentHistory, setCurrentHistory] = useState("");
 
@@ -138,29 +138,22 @@ const App = () => {
       }
 
       if (!history) {
-        const initialHistory = [
+        const initialHistory: ChatSession[] = [
           {
             id: uuidv4(),
-            title: "",
-            time: new Date().toLocaleString("ja-JP", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-              hour12: false, // 使用24小时制
-            }),
+            type: "chat",
+            content: "New chat session",
+            time: new Date().toISOString(),
             chats: [],
           },
         ];
         localStorage.setItem("history", JSON.stringify(initialHistory));
-
-        setLocalHistory(initialHistory as any);
-        setCurrentHistory(initialHistory[0].id as string);
+        setLocalHistory(initialHistory);
+        setCurrentHistory(initialHistory[0].id);
       } else {
-        setLocalHistory(JSON.parse(history));
-        setCurrentHistory(JSON.parse(history)[0].id);
+        const parsedHistory = JSON.parse(history) as ChatSession[];
+        setLocalHistory(parsedHistory);
+        setCurrentHistory(parsedHistory[0].id);
       }
 
       setIsInitialized(true);

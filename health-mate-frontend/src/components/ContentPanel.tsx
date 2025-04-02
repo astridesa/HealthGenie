@@ -6,6 +6,7 @@ import LinearProgress from "@mui/material/LinearProgress";
 import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "../constant/server";
 import Selector from "./Selector";
+import { ChatSession } from "../types/chat";
 
 interface HistoryItem {
   id: string;
@@ -17,13 +18,13 @@ interface HistoryItem {
 interface ContentPanelProps {
   data: any;
   selectedId: string | null;
-  localHistory: HistoryItem[];
-  setLocalHistory: React.Dispatch<React.SetStateAction<HistoryItem[]>>;
+  localHistory: ChatSession[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   chats: any[];
-  setChats: React.Dispatch<React.SetStateAction<any[]>>;
+  setChats: (chats: any[]) => void;
   slideValue: number;
   recommendQuery: string;
-  setRecommendQuery: React.Dispatch<React.SetStateAction<string>>;
+  setRecommendQuery: (query: string) => void;
   onSendMessage: (message: string) => void;
   isLoading: boolean;
   handleMentionNode: (nodes: any[], keywordNodes: any[]) => void;

@@ -2,16 +2,16 @@ import React from "react";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "../constant/server";
+import { ChatSession } from "../types/chat";
 
 interface ChatHistoryProps {
-  localHistory: any[];
+  localHistory: ChatSession[];
   setCurrentHistory: (id: string) => void;
   localUserId: string;
-  setLocalHistory: (history: any[]) => void;
-  onNewChat: () => void;
+  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
 }
 
-const ChatHistory = ({ localHistory, setCurrentHistory, localUserId, setLocalHistory, onNewChat }: ChatHistoryProps) => {
+const ChatHistory = ({ localHistory, setCurrentHistory, localUserId, setLocalHistory }: ChatHistoryProps) => {
   const handleClick = (id: string) => {
     setCurrentHistory(id);
   };
@@ -36,7 +36,7 @@ const ChatHistory = ({ localHistory, setCurrentHistory, localUserId, setLocalHis
       return response.json();
     },
     onSuccess: (_, historyId) => {
-      const updatedHistory = localHistory.filter((item: any) => item.time !== historyId);
+      const updatedHistory = localHistory.filter((item: ChatSession) => item.time !== historyId);
       setLocalHistory(updatedHistory);
     },
   });
@@ -47,7 +47,7 @@ const ChatHistory = ({ localHistory, setCurrentHistory, localUserId, setLocalHis
   };
 
   // Filter out operation history (include/exclude/cancel/apply)
-  const chatHistory = localHistory.filter((history: any) => 
+  const chatHistory = localHistory.filter((history: ChatSession) => 
     history.type === "chat" || history.type === "recommendation"
   );
 
@@ -55,7 +55,7 @@ const ChatHistory = ({ localHistory, setCurrentHistory, localUserId, setLocalHis
     <div className="flex flex-col h-full">
       <ul className="space-y-4 text-sm text-gray-700 flex-1 overflow-y-auto">
         {chatHistory.length > 0 &&
-          chatHistory.map((history: any, index: any) => (
+          chatHistory.map((history: ChatSession) => (
             <li
               key={history.time}
               className="p-4 bg-white rounded-lg shadow-sm hover:shadow-md cursor-pointer transition duration-200 relative group"
