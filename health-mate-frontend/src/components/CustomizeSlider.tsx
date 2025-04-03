@@ -32,11 +32,11 @@ const CustomRangeSlider = ({
   };
 
   return (
-    <div className="relative w-full my-5">
-      <div className="absolute w-full h-2.5 bg-white border border-gray-300 rounded-md top-1/2 -translate-y-1/2 z-0"></div>
+    <div className="relative w-full my-1">
+      <div className="absolute w-full h-2 bg-white border border-gray-300 rounded-md top-1/2 -translate-y-1/2 z-0"></div>
       <div
         ref={rangeFillRef}
-        className="absolute h-2.5 bg-purple-300 rounded-md top-1/2 -translate-y-1/2 z-1 left-0"
+        className="absolute h-2 bg-[#bf8ac1] rounded-md top-1/2 -translate-y-1/2 z-1 left-0"
         style={{ width: `${((value - min) / (max - min)) * 100}%` }}
       ></div>
       <input
@@ -46,9 +46,8 @@ const CustomRangeSlider = ({
         max={max}
         value={value}
         onChange={handleChange}
-        className="relative w-full h-2.5 bg-transparent appearance-none cursor-pointer z-10 focus:outline-none"
+        className="relative w-full h-2 bg-transparent appearance-none cursor-pointer z-10 focus:outline-none"
         style={{
-          // 自定义滑块的样式
           WebkitAppearance: "none",
           appearance: "none",
         }}
@@ -58,8 +57,8 @@ const CustomRangeSlider = ({
           -webkit-appearance: none;
           appearance: none;
           width: 6px;
-          height: 20px;
-          background: #9333ea;
+          height: 16px;
+          background: #bf8ac1;
           cursor: pointer;
           position: relative;
           z-index: 10;
@@ -68,8 +67,8 @@ const CustomRangeSlider = ({
 
         input[type="range"]::-moz-range-thumb {
           width: 6px;
-          height: 20px;
-          background: #9333ea;
+          height: 16px;
+          background: #bf8ac1;
           cursor: pointer;
           position: relative;
           z-index: 10;

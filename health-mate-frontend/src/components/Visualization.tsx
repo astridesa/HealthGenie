@@ -9,10 +9,15 @@ import {
 } from "../utils/utils";
 import NodeTooltip from "./Tooltip";
 import PreferenceSelector from "./PreferenceSelector";
+import LevelSlider from "./LevelSlider";
 import { useMutation } from "@tanstack/react-query";
 import { SERVER_URL } from "@/constant/server";
 import { colors, getCategoryColor } from "@/constant/colors";
 import { ChatSession } from "../types/chat";
+import { processKnowledgeGraphData, combineSubgraphs } from '@/utils/subgraphProcessor';
+import { BaseType, Element, EnterElement, Selection, TransitionLike } from 'd3';
+import { Node, Link } from '@/types/graph';
+import { getNodeColor } from '@/utils/colors';
 
 interface TooltipProps {
   x: number;
@@ -28,7 +33,10 @@ interface TooltipProps {
 }
 
 interface VisualizationProps {
-  visData: any;
+  visData: {
+    nodes: D3Node[];
+    links: D3Link[];
+  };
   setVisData: (data: any) => void;
   setChats: (chats: any) => void;
   setRecommendQuery: (query: string) => void;
@@ -37,14 +45,32 @@ interface VisualizationProps {
   setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   isOverview: boolean;
   selectedId: number | null;
-  keywordNodes: number[];
+  keywordNodes: D3Node[];
   handleClickedNode: (id: number) => void;
-  clickedNode: any;
-  addSlideBarChat: (nodeId: number, nodeName: string) => void;
-  showRelatedNode: (slide: number) => void;
+  clickedNode: D3Node | null;
+  addSlideBarChat: (id: number, name: string) => void;
+  showRelatedNode: (nodes: D3Node[]) => void;
   slideValue: number;
   cancel: () => void;
   localUserId: string;
+}
+
+interface D3Node extends d3.SimulationNodeDatum {
+  id: number;
+  name: string;
+  chinese: string;
+  category: string;
+  isShared: boolean;
+  x?: number;
+  y?: number;
+}
+
+interface D3Link extends d3.SimulationLinkDatum<D3Node> {
+  source: D3Node;
+  target: D3Node;
+  relation: string;
+  isShared: boolean;
+  index: number;
 }
 
 const sendClickHistory = async (history: ChatSession, localUserId: string) => {
@@ -66,8 +92,12 @@ const sendClickHistory = async (history: ChatSession, localUserId: string) => {
   return response.json();
 };
 
-const Visualization = (props: VisualizationProps) => {
+const Visualization: React.FC<VisualizationProps> = (props) => {
   const d3Container = useRef<SVGSVGElement>(null);
+  const [levelValue, setLevelValue] = useState(1);
+  const [subgraphData, setSubgraphData] = useState<any>(null);
+  const [simulation, setSimulation] = useState<d3.Simulation<D3Node, D3Link> | null>(null);
+  const [mentionedNodes, setMentionedNodes] = useState<D3Node[]>([]);
 
   const width = 700;
 
@@ -97,39 +127,46 @@ const Visualization = (props: VisualizationProps) => {
   };
 
   const renderNodes = (
-    nodes: any,
-    topNodes: any,
-    keywordNodes: any,
-    mouseover: any,
-    mouseout: any,
-    startDrag: any,
-    dragging: any,
-    endDrag: any,
+    nodes: D3Node[],
+    topNodes: D3Node[],
+    keywordNodes: D3Node[],
+    mouseover: (event: any, d: D3Node) => void,
+    mouseout: (event: any, d: D3Node) => void,
+    startDrag: (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => void,
+    dragging: (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => void,
+    endDrag: (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => void,
   ) => {
-    d3.select("g.nodes")
-      .selectAll("circle")
-      .data(nodes, (data: any) => data.id)
+    d3.select(d3Container.current)
+      .select("g.nodes")
+      .selectAll<SVGCircleElement, D3Node>("circle")
+      .data(nodes, (d: D3Node) => d.id)
       .exit()
       .remove();
 
-    d3.select("g.nodes")
-      .selectAll("circle")
-      .data(nodes, (data: any) => data.id)
+    d3.select(d3Container.current)
+      .select("g.nodes")
+      .selectAll<SVGCircleElement, D3Node>("circle")
+      .data(nodes, (d: D3Node) => d.id)
       .enter()
       .append("circle")
-      .attr("r", (d) => {
-        return isNodeInsideSliceArray(topNodes, d) ? (d as any).radius : 12;
+      .attr("r", (d: D3Node) => {
+        if (d.isShared) {
+          return isNodeInsideSliceArray(topNodes, d) ? 14 : 12;
+        }
+        return isNodeInsideSliceArray(topNodes, d) ? 12 : 10;
       })
       .style("opacity", 1)
-      .attr("fill", (d: any) => {
+      .attr("fill", (d: D3Node) => {
         return getCategoryColor(d.category);
       })
+      .attr("stroke", (d: D3Node) => d.isShared ? "#000" : "none")
+      .attr("stroke-width", (d: D3Node) => d.isShared ? 2 : 0)
+      .attr("stroke-dasharray", (d: D3Node) => d.isShared ? "5,5" : "none")
       .on("mouseover", mouseover)
       .on("mouseout", mouseout)
-      .on("click", (event: any, d: any) => {
+      .on("click", (event: any, d: D3Node) => {
         console.log("Clicked node:", d);
         console.log("Node category:", d.category);
-        // Only trigger click event if the node has a valid category code
         if (d.category && ["A1", "A2", "A3", "B1", "B2", "B3", "C", "D"].includes(d.category)) {
           console.log("Valid category found:", d.category);
           props.handleClickedNode(d.id);
@@ -157,72 +194,79 @@ const Visualization = (props: VisualizationProps) => {
           console.log("Invalid or no category");
         }
       })
-      .call(
-        (d3 as any)
-          .drag()
-          .on("start", startDrag)
-          .on("drag", dragging)
-          .on("end", endDrag),
-      )
+      .call(d3.drag<SVGCircleElement, D3Node>()
+        .on("start", startDrag)
+        .on("drag", dragging)
+        .on("end", endDrag))
       .call(updateNode);
   };
 
-  const renderLinks = (links: any, update: any) => {
-    // First remove any existing links
-    d3.select(d3Container.current)
-      .select("g.links")
-      .selectAll("line")
-      .data(links, (data: any) => data.index)
-      .exit()
-      .remove();
+  const renderLinks = (links: D3Link[], update: (selection: d3.Selection<SVGLineElement, D3Link, SVGGElement, unknown>) => void) => {
+    const linkSelection = d3.select(d3Container.current)
+      .select<SVGGElement>("g.links")
+      .selectAll<SVGLineElement, D3Link>("line")
+      .data(links, (d: D3Link) => d.index);
 
-    // Then add new links
-    d3.select(d3Container.current)
-      .select("g.links")
-      .selectAll("line")
-      .data(links, (data: any) => data.index)
+    linkSelection.exit().remove();
+
+    const enterSelection = linkSelection
       .enter()
       .append("line")
       .attr("stroke", "#E5EAEB")
-      .attr("stroke-width", (d: any) => {
+      .attr("stroke-width", (d: D3Link) => {
+        if (d.isShared) return "2px";
         return d.relation === "功效" ? "2px" : "1px";
       })
-      .attr("stroke-dasharray", (d: any) => {
+      .attr("stroke-dasharray", (d: D3Link) => {
+        if (d.isShared) return "5,5";
         return d.relation === "功效" ? "5,5" : "none";
       })
-      .attr("marker-end", "url(#arrowhead)")
-      .call(update);
+      .attr("marker-end", "url(#arrowhead)");
+
+    update(enterSelection);
   };
 
-  const renderNodeLabels = (display: any) => {
-    d3.select("g.labelNodes").selectAll("rect").attr("display", display);
-
-    d3.select("g.labelNodes").selectAll("text").attr("display", display);
-  };
-
-  const renderLinkLabels = (links: any) => {
-    // First remove any existing labels
+  const renderNodeLabels = (nodes: any) => {
     d3.select(d3Container.current)
-      .select("g.linkLabels")
-      .selectAll("text")
-      .data(links, (data: any) => data.index)
+      .select("g.labelNodes")
+      .selectAll("rect")
+      .data(nodes, (d: any) => d.id)
       .exit()
       .remove();
 
-    // Then add new labels
     d3.select(d3Container.current)
-      .select("g.linkLabels")
+      .select("g.labelNodes")
+      .selectAll("rect")
+      .data(nodes, (d: any) => d.id)
+      .enter()
+      .append("rect")
+      .attr("fill", "white")
+      .attr("rx", 4)
+      .attr("ry", 4)
+      .attr("width", (d: any) => d.name.length * 4 + 8)
+      .attr("height", 16)
+      .style("opacity", 0)
+      .style("pointer-events", "none")
+      .call(updateNodeLabel);
+
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
       .selectAll("text")
-      .data(links, (data: any) => data.index)
+      .data(nodes, (d: any) => d.id)
+      .exit()
+      .remove();
+
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
+      .selectAll("text")
+      .data(nodes, (d: any) => d.id)
       .enter()
       .append("text")
-      .attr("fill", "#8d8d8d")
-      .attr("font-size", (d: any) => {
-        return d.relation === "功效" ? "12px" : "10px";
-      })
-      .text((d: any) => d.relation)
+      .attr("fill", "#666")
+      .attr("font-size", "12px")
+      .text((d: any) => d.name)
       .style("pointer-events", "none")
-      .call(updateLinkLabel);
+      .call(updateNodeLabel);
   };
 
   const updateNode = (node: any) => {
@@ -231,528 +275,315 @@ const Visualization = (props: VisualizationProps) => {
     });
   };
 
+  const updateNodeLabel = (label: any) => {
+    label.attr("transform", function(d: any) {
+      const x = d.x - (d.name.length * 2 + 4);
+      const y = d.y - 20;
+      return `translate(${x},${y})`;
+    });
+  };
+
   const updateLinkLabel = (label: any) => {
-    label.attr("transform", function (d: any) {
+    label.attr("transform", function(d: any) {
       const diffX = d.target.x - d.source.x;
       const diffY = d.target.y - d.source.y;
       const angle = Math.atan2(diffY, diffX) * 180 / Math.PI;
       
-      // Position the label at the middle of the link
       const x = d.source.x + 0.5 * diffX;
       const y = d.source.y + 0.5 * diffY;
       
-      // Rotate the label to align with the link
       return `translate(${x},${y}) rotate(${angle})`;
     })
-    .attr("text-anchor", "middle") // Center the text
-    .attr("dy", "0.35em"); // Adjust vertical position
+    .attr("text-anchor", "middle")
+    .attr("dy", "0.35em");
   };
 
-  /* The useEffect Hook is for running side effects outside of React,
-       for instance inserting elements into the DOM using D3 */
-  useEffect(
-    () => {
-      if (props.visData && d3Container.current) {
-        // D3 Logic
-        // remove previous rendered svg
-        const preExistGroup = d3Container.current?.querySelector("g");
-        preExistGroup && preExistGroup.remove();
+  const renderLinkLabels = (links: any) => {
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .data(links, (data: any) => data.index)
+      .exit()
+      .remove();
 
-        const svg = d3
-          .select(d3Container.current)
-          .attr("width", width)
-          .attr("height", "calc(100vh - 76px)");
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .data(links, (data: any) => data.index)
+      .enter()
+      .append("text")
+      .attr("fill", "#8d8d8d")
+      .attr("font-size", "12px")
+      .text((d: any) => d.relation)
+      .style("pointer-events", "none")
+      .style("opacity", 0)
+      .call(updateLinkLabel);
+  };
 
-        let graph = props.visData;
+  const handleLevelChange = (value: number) => {
+    setLevelValue(value);
+  };
 
-        const label: any = {
-          nodes: [],
-          links: [],
-        };
+  const updateLink = (selection: d3.Selection<SVGLineElement, D3Link, SVGGElement, unknown>) => {
+    selection
+      .attr("x1", (d: D3Link) => d.source.x || 0)
+      .attr("y1", (d: D3Link) => d.source.y || 0)
+      .attr("x2", (d: D3Link) => d.target.x || 0)
+      .attr("y2", (d: D3Link) => d.target.y || 0);
+  };
 
-        graph = addRadiusToNode(addFrequencyToNode(graph));
-        const sortedArray = sortNodesByFrequency(graph.nodes);
-        const topThreeHundredNodes = sortedArray.slice(0, 100);
-        const topTenNodes = sortedArray.slice(0, 50);
+  const focus = (event: any, d: any) => {
+    const value = d.name;
+    const div = document.getElementById("tooltip");
+    if (div) {
+      div.style.display = "block";
+      div.innerHTML = value;
+    }
 
-        topThreeHundredNodes.forEach(function (d: any, i: any) {
-          label.nodes.push({ node: d });
-          label.nodes.push({ node: d });
-          label.links.push({
-            source: i * 2,
-            target: i * 2 + 1,
-          });
-        });
-
-        const labelLayout = d3
-          .forceSimulation(label.nodes)
-          .force("charge", d3.forceManyBody().strength(-50))
-          .force("link", d3.forceLink(label.links).distance(0).strength(2));
-
-        const simulation = d3
-          .forceSimulation(graph.nodes)
-          .force(
-            "link",
-            d3
-              .forceLink(graph.links)
-              .id((d: any) => d.id)
-              .distance(150)
-          )
-          .force("charge", d3.forceManyBody().strength(-300))
-          .force("center", d3.forceCenter(width / 2, height / 2))
-          .force("collision", d3.forceCollide().radius(60))
-          .force("x", d3.forceX(width / 2).strength(0.1))
-          .force("y", d3.forceY(height / 2).strength(0.1));
-
-        const graphLayout = d3
-          .forceSimulation(graph.nodes)
-          .force("charge", d3.forceManyBody().strength(-3000))
-          .force("center", d3.forceCenter(width / 2, height / 2))
-          .force("x", d3.forceX(width / 2).strength(1))
-          .force("y", d3.forceY(height / 2).strength(1))
-          .force(
-            "link",
-            d3
-              .forceLink(graph.links)
-              .id(function (d: any) {
-                return d.id;
-              })
-              .distance(props.selectedId !== null ? 400 : 100)
-              .strength(1),
-          )
-          .on("tick", ticked);
-
-        const adjlist = {};
-        let topThreeHundredLinks: any = [];
-
-        graph.links.forEach(function (d: any) {
-          const source = d.source.id;
-          const target = d.target.id;
-
-          const sourceExist = topThreeHundredNodes.some(
-            (node: any) => node.id === source,
-          );
-          const targetExist = topThreeHundredNodes.some(
-            (node: any) => node.id === target,
-          );
-
-          if (sourceExist && targetExist) {
-            topThreeHundredLinks.push(d);
-            if (d.source.id < d.target.id) {
-              (adjlist as any)[d.source.id + "-" + d.target.id] = true;
-            } else {
-              (adjlist as any)[d.target.id + "-" + d.source.id] = true;
-            }
-          }
-        });
-
-        topThreeHundredLinks = processDuplicates(topThreeHundredLinks);
-
-        d3.select("svg").data(props.visData);
-        // union_annotation
-        const container = svg.append("g").attr("class", "containerGroup");
-
-        const zoom = d3
-          .zoom<SVGSVGElement, unknown>()
-          .scaleExtent([0.1, 4])
-          .on("zoom", (event) => {
-            container.attr("transform", event.transform);
-          });
-
-        svg.call(zoom);
-
-        const easyRenderNodes = (
-          nodes: any,
-          topNodes: any,
-          keywordNodes: any,
-        ) =>
-          renderNodes(
-            nodes,
-            topNodes,
-            keywordNodes,
-            focus,
-            unfocus,
-            dragstarted,
-            dragged,
-            dragended,
-          );
-
-        container
-          .append("svg:defs")
-          .selectAll("marker")
-          .data(["end"]) // Different link/path types can be defined here
-          .enter()
-          .append("marker") // This section adds in the arrows
-          .attr("id", "arrowhead")
-          .attr("viewBox", "0 -5 10 10")
-          .attr("refX", 0)
-          .attr("refY", 0)
-          .attr("markerWidth", 6)
-          .attr("markerHeight", 6)
-          .attr("orient", "auto")
-          .attr("xoverflow", "visible")
-          .append("svg:path")
-          .attr("d", "M 0,-5 L 10 ,0 L 0,5")
-          .attr("fill", "#E5EAEB")
-          .style("stroke", "none");
-
-        container
-          .append("g")
-          .attr("class", "links")
-          .selectAll("line")
-          .data(topThreeHundredLinks, (data: any) => data.index)
-          .enter()
-          .append("line")
-          .attr("stroke", "#E5EAEB")
-          .attr("stroke-width", "1px")
-          .attr("stroke-opacity", (d) => {
-            return 1;
-          })
-          .attr("marker-end", "url(#arrowhead)");
-
-        const linkLabelGroup = container
-          .append("g")
-          .attr("class", "linkLabels");
-
-        const initTexts = linkLabelGroup
-          .selectAll("text")
-          .data([], (link: any) => link.index) // Start with empty data
-          .enter()
-          .append("text")
-          .attr("fill", "#8d8d8d")
-          .attr("font-size", (d: any) => {
-            return d.relation === "功效" ? "12px" : "10px";
-          })
-          .text((d: any) => d.relation)
-          .style("pointer-events", "none")
-          .call(updateLinkLabel);
-
-        const initLines = linkLabelGroup
-          .selectAll("line")
-          .data(
-            props.selectedId
-              ? props.selectedId > 0
-                ? topThreeHundredLinks.slice(
-                    0,
-                    topThreeHundredLinks.length / 10,
-                  )
-                : topThreeHundredLinks.slice(
-                    0,
-                    Math.max(1, topThreeHundredLinks.length / 10),
-                  )
-              : [],
-            (link: any) => link.index,
-          )
-          .enter()
-          .append("line");
-
-        initTexts.each(function (d, i) {
-          const bbox = this.getBBox();
-
-          initLines
-            .filter((_, j) => i === j)
-            .attr("x1", bbox.x)
-            .attr("y1", bbox.y + bbox.height + 1) // 调整线条的垂直位置
-            .attr("x2", bbox.x + bbox.width)
-            .attr("y2", bbox.y + bbox.height + 1)
-            .style("stroke", "#bdbde9")
-            .style("stroke-width", 1);
-        });
-
-        container
-          .append("g")
-          .attr("class", "nodes")
-          .selectAll("circle")
-          .data(topThreeHundredNodes, (data: any) => data.id)
-          .enter()
-          .append("circle")
-          .attr("r", (d) => {
-            return isNodeInsideSliceArray(topTenNodes, d)
-              ? (d as any).radius
-              : 12;
-          })
-          .style("opacity", 1)
-          .attr("fill", (d: any) => {
-            return getCategoryColor(d.category);
-          })
-          .on("mouseover", focus)
-          .on("mouseout", unfocus)
-          .on("click", (event: any, d: any) => {
-            console.log("Clicked node:", d);
-            console.log("Node category:", d.category);
-            // Only trigger click event if the node has a valid category code
-            if (d.category && ["A1", "A2", "A3", "B1", "B2", "B3", "C", "D"].includes(d.category)) {
-              console.log("Valid category found:", d.category);
-              props.handleClickedNode(d.id);
-              props.addSlideBarChat(d.id, d.name);
-              mutation.mutate({
-                id: props.localUserId,
-                content: d.name,
-                time: new Date().toISOString(),
-                type: "click",
-                chats: []
-              });
-              setTooltipProps({
-                x: event.offsetX,
-                y: event.offsetY,
-                title: d.name,
-                content: d.name,
-                setTooltipProps,
-                setVisData: props.setVisData,
-                currentHistory: props.currentHistory,
-                localHistory: props.localHistory,
-                setLocalHistory: props.setLocalHistory,
-                localUserId: props.localUserId
-              });
-            } else {
-              console.log("Invalid or no category");
-            }
-          })
-          .call(
-            (d3 as any)
-              .drag()
-              .on("start", dragstarted)
-              .on("drag", dragged)
-              .on("end", dragended),
-          );
-
-        const labelGroup = container.append("g").attr("class", "labelNodes");
-
-        const backgroundRects = labelGroup
-          .selectAll("rect")
-          .data(label.nodes, (data: any) => data.id)
-          .enter()
-          .append("rect")
-          .attr("fill", "white")
-          .attr("stroke", "#bdbde9")
-          .attr("stroke-width", (d, i) => (i % 2 !== 0 ? 2 : 0))
-          .attr("rx", (d, i) => (i % 2 !== 0 ? 4 : 0))
-          .attr("ry", (d, i) => (i % 2 !== 0 ? 4 : 0));
-
-        const textLabels = labelGroup
-          .selectAll("text")
-          .data(label.nodes, (data: any) => data.id)
-          .enter()
-          .append("text")
-          .text((d: any, i) => {
-            if (props.isOverview) {
-              return i % 2 !== 0 &&
-                isNodeInsideSliceArray(topThreeHundredNodes, d.node)
-                ? d.node.name
-                : "";
-            } else {
-              return i % 2 !== 0 ? d.node.name : "";
-            }
-          })
-          .style("fill", "#012027")
-          .style("opacity", 1)
-          .style("font-size", 12)
-          .style("pointer-events", "none");
-        // to prevent mouseover/drag capture
-
-        textLabels.each(function (d, i) {
-          const bbox = this.getBBox();
-          const padding = 4; // 文本周围的额外空间
-
-          backgroundRects
-            .filter((_, j) => i === j && j % 2 !== 0)
-            .attr("x", bbox.x - padding / 2)
-            .attr("y", bbox.y - padding / 2)
-            .attr("width", bbox.width + padding)
-            .attr("height", bbox.height + padding);
-        });
-
-        const neigh = (a: any, b: any) => {
-          const start = a < b ? a : b;
-          const end = a < b ? b : a;
-          return a === b || (adjlist as any)[`${start}-${end}`];
-        };
-
-        function ticked() {
-          d3.select("g.nodes").selectAll("circle").call(updateNode);
-          d3.select("g.links").selectAll("line").call(updateLink);
-
-          labelLayout.alphaTarget(0.2).restart();
-
-          d3.select("g.labelNodes")
-            .selectAll("text")
-            .each(function (d: any, i) {
-              if (i % 2 === 0) {
-                d.x = d.node.x;
-                d.y = d.node.y;
-              } else {
-                const b = (this as any).getBBox();
-
-                const diffX = d.x - d.node.x;
-                const diffY = d.y - d.node.y;
-
-                const dist = Math.sqrt(diffX * diffX + diffY * diffY);
-
-                let shiftX = (b.width * (diffX - dist)) / (dist * 2);
-                shiftX = Math.max(-b.width, Math.min(0, shiftX));
-                const shiftY = 16;
-
-                (this as any).setAttribute(
-                  "transform",
-                  "translate(" + shiftX + "," + shiftY + ")",
-                );
-              }
-            })
-            .call(updateNode);
-
-          d3.select("g.linkLabels").selectAll("text").call(updateLinkLabel);
-
-          d3.select("g.linkLabels").selectAll("line").call(updateLinkLabel);
-
-          d3.select("g.labelNodes").selectAll("rect").call(updateNode);
-        }
-
-        function focus(event: any, d: any) {
-          const id = d.id;
-          const relatedNodes = [d];
-          let relatedLinks: any = [];
-
-          graph.links.forEach((link: any) => {
-            if (link.source.id === id) {
-              relatedNodes.push(link.target);
-              relatedLinks.push(link);
-              return;
-            }
-            if (link.target.id === id) {
-              relatedNodes.push(link.source);
-              relatedLinks.push(link);
-              return;
-            }
-          });
-
-          relatedLinks = processDuplicates(relatedLinks);
-
-          easyRenderNodes(relatedNodes, topTenNodes, props.keywordNodes);
-          renderLinks(relatedLinks, updateLink);
-          renderNodeLabels((d: any) => neigh(id, d.node.id) ? "block" : "none");
-          renderLinkLabels(relatedLinks); // Show labels only for related links on hover
-        }
-
-        function unfocus() {
-          const defaultDisplayLinks = props.selectedId
-            ? props.selectedId > 0
-              ? topThreeHundredLinks.slice(0, topThreeHundredLinks.length / 10)
-              : topThreeHundredLinks.slice(0, Math.max(1, topThreeHundredLinks.length / 10))
-            : topThreeHundredLinks;
-
-          renderLinkLabels([]); // Hide all labels when not hovering
-          easyRenderNodes(topThreeHundredNodes, topTenNodes, props.keywordNodes);
-          renderLinks(topThreeHundredLinks, updateLink);
-          renderNodeLabels("display");
-        }
-
-        function updateLink(link: any) {
-          link
-            .attr("x1", function (d: any) {
-              const isSourceTopTen = isNodeInsideSliceArray(
-                topTenNodes,
-                d.source,
-              );
-              const r = isSourceTopTen ? d.source.radius : 12;
-              return (
-                d.source.x +
-                ((d.target.x - d.source.x) /
-                  Math.sqrt(
-                    Math.pow(d.target.x - d.source.x, 2) +
-                      Math.pow(d.target.y - d.source.y, 2),
-                  )) *
-                  r
-              );
-            })
-            .attr("y1", function (d: any) {
-              const isSourceTopTen = isNodeInsideSliceArray(
-                topTenNodes,
-                d.source,
-              );
-              const r = isSourceTopTen ? d.source.radius : 12;
-              return (
-                d.source.y +
-                ((d.target.y - d.source.y) /
-                  Math.sqrt(
-                    Math.pow(d.target.x - d.source.x, 2) +
-                      Math.pow(d.target.y - d.source.y, 2),
-                  )) *
-                  r
-              );
-            })
-            .attr("x2", function (d: any) {
-              const isTargetTopTen = isNodeInsideSliceArray(
-                topTenNodes,
-                d.target,
-              );
-              const r = isTargetTopTen ? d.source.radius - 3 : 12;
-              return (
-                d.target.x -
-                ((d.target.x - d.source.x) /
-                  Math.sqrt(
-                    Math.pow(d.target.x - d.source.x, 2) +
-                      Math.pow(d.target.y - d.source.y, 2),
-                  )) *
-                  r *
-                  2
-              );
-            })
-            .attr("y2", function (d: any) {
-              const isTargetTopTen = isNodeInsideSliceArray(
-                topTenNodes,
-                d.target,
-              );
-              const r = isTargetTopTen ? d.source.radius - 3 : 12;
-              return (
-                d.target.y -
-                ((d.target.y - d.source.y) /
-                  Math.sqrt(
-                    Math.pow(d.target.x - d.source.x, 2) +
-                      Math.pow(d.target.y - d.source.y, 2),
-                  )) *
-                  r *
-                  2
-              );
-            })
-            .attr("marker-end", "url(#arrowhead)")
-            .style("stroke-width", 2);
-        }
-
-        function dragstarted(event: any, d: any) {
-          event.sourceEvent.stopPropagation();
-          if (!event.active) graphLayout.alphaTarget(0.4).restart();
-          d.fx = d.x;
-          d.fy = d.y;
-        }
-
-        function dragged(event: any, d: any) {
-          d.fx = event.x;
-          d.fy = event.y;
-        }
-
-        function dragended(event: any, d: any) {
-          if (!event.active) graphLayout.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
-        }
+    // Get all neighboring nodes
+    const neighboringNodes = new Set<number>();
+    neighboringNodes.add(d.id);
+    
+    // Find all connected nodes through links
+    props.visData.links.forEach((link: any) => {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      
+      if (sourceId === d.id) {
+        neighboringNodes.add(targetId);
       }
-    },
+      if (targetId === d.id) {
+        neighboringNodes.add(sourceId);
+      }
+    });
 
-    /*
-            useEffect has a dependency array (below). It's a list of dependency
-            variables for this useEffect block. The block will run after mount
-            and whenever any of these variables change. We still have to check
-            if the variables are valid, but we do not have to compare old props
-            to next props to decide whether to rerender.
-        */
-    [
-      props.visData,
-      props.isOverview,
-      d3Container.current,
+    console.log('Hovered node:', d.id);
+    console.log('Neighboring nodes:', Array.from(neighboringNodes));
+
+    // Hide unrelated nodes and links
+    d3.select(d3Container.current)
+      .select("g.nodes")
+      .selectAll("circle")
+      .style("opacity", function(node: any) {
+        const nodeId = typeof node === 'object' ? node.id : node;
+        const isVisible = neighboringNodes.has(nodeId);
+        console.log('Node:', nodeId, 'Visible:', isVisible);
+        return isVisible ? 1 : 0;
+      });
+
+    d3.select(d3Container.current)
+      .select("g.links")
+      .selectAll("line")
+      .style("opacity", function(link: any) {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+        const isVisible = sourceId === d.id || targetId === d.id;
+        console.log('Link:', sourceId, '->', targetId, 'Visible:', isVisible);
+        return isVisible ? 1 : 0;
+      });
+
+    // Show labels only for related links
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .style("opacity", function(link: any) {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+        return (sourceId === d.id || targetId === d.id) ? 1 : 0;
+      });
+
+    // Hide unrelated node labels
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
+      .selectAll("text")
+      .style("opacity", function(node: any) {
+        const nodeId = typeof node === 'object' ? node.id : node;
+        return neighboringNodes.has(nodeId) ? 1 : 0;
+      });
+  };
+
+  const unfocus = () => {
+    const div = document.getElementById("tooltip");
+    if (div) {
+      div.style.display = "none";
+    }
+
+    // Restore visibility of all nodes and links
+    d3.select(d3Container.current)
+      .select("g.nodes")
+      .selectAll("circle")
+      .style("opacity", 1);
+
+    d3.select(d3Container.current)
+      .select("g.links")
+      .selectAll("line")
+      .style("opacity", 1);
+
+    // Hide all link labels
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .style("opacity", 0);
+
+    // Restore visibility of all node labels
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
+      .selectAll("text")
+      .style("opacity", 1);
+  };
+
+  const dragstarted = (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => {
+    if (!event.active || !simulation) return;
+    simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  };
+
+  const dragged = (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => {
+    if (!simulation) return;
+    d.fx = event.x;
+    d.fy = event.y;
+    simulation.alphaTarget(0.3).restart();
+  };
+
+  const dragended = (event: d3.D3DragEvent<SVGCircleElement, D3Node, unknown>, d: D3Node) => {
+    if (!event.active || !simulation) return;
+    simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  };
+
+  const ticked = () => {
+    d3.select(d3Container.current)
+      .select("g.nodes")
+      .selectAll("circle")
+      .call(updateNode);
+    
+    d3.select(d3Container.current)
+      .select("g.links")
+      .selectAll("line")
+      .call(updateLink);
+    
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .call(updateLinkLabel);
+    
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
+      .selectAll("rect")
+      .call(updateNodeLabel);
+    
+    d3.select(d3Container.current)
+      .select("g.labelNodes")
+      .selectAll("text")
+      .call(updateNodeLabel);
+  };
+
+  useEffect(() => {
+    if (!d3Container.current || !props.visData) return;
+
+    // Stop any existing simulation
+    if (simulation) {
+      simulation.stop();
+    }
+
+    // Clear existing visualization completely
+    d3.select(d3Container.current).selectAll("*").remove();
+
+    const svg = d3
+      .select(d3Container.current)
+      .attr("width", width)
+      .attr("height", "calc(100vh - 76px)");
+
+    // Use the data directly from props.visData
+    const graph = {
+      nodes: props.visData.nodes.map((node: any) => ({
+        ...node,
+        x: node.x || width / 2,
+        y: node.y || height / 2
+      })),
+      links: props.visData.links.map((link: any, index: number) => ({
+        ...link,
+        index: link.index || index
+      }))
+    };
+
+    // Create container group
+    const container = svg.append("g").attr("class", "containerGroup");
+
+    // Add zoom behavior
+    const zoom = d3
+      .zoom()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event) => {
+        container.attr("transform", event.transform);
+      });
+
+    svg.call(zoom);
+
+    // Add arrowhead marker
+    container
+      .append("defs")
+      .append("marker")
+      .attr("id", "arrowhead")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 15)  // Adjust this value to position the arrowhead
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M0,-5L10,0L0,5")
+      .attr("fill", "#E5EAEB");
+
+    // Create groups for links, nodes, and labels
+    container.append("g").attr("class", "links");
+    container.append("g").attr("class", "nodes");
+    container.append("g").attr("class", "linkLabels");
+    container.append("g").attr("class", "labelNodes");
+
+    // Set up force simulation with the new data
+    const newSimulation = d3
+      .forceSimulation(graph.nodes)
+      .force("charge", d3.forceManyBody().strength(-100))  // Increased repulsion
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("link", d3.forceLink(graph.links)
+        .id((d: any) => d.id)
+        .distance(100))  // Increased link distance
+      .force("collision", d3.forceCollide().radius(30))
+      .alphaDecay(0.05)
+      .alphaMin(0.001)
+      .velocityDecay(0.4);
+
+    setSimulation(newSimulation);
+
+    // Render visualization elements with the new data
+    renderLinks(graph.links, updateLink);
+    renderNodes(
+      graph.nodes,
+      [],
       props.keywordNodes,
-      props.handleClickedNode,
-    ],
-  );
+      focus,
+      unfocus,
+      dragstarted,
+      dragged,
+      dragended
+    );
+    renderLinkLabels(graph.links);
+    renderNodeLabels(graph.nodes);
+
+    // Update positions on each tick
+    newSimulation.on("tick", ticked);
+
+    // Cleanup
+    return () => {
+      newSimulation.stop();
+      if (d3Container.current) {
+        d3.select(d3Container.current).selectAll("*").remove();
+      }
+    };
+  }, [props.visData, props.keywordNodes]);
 
   return (
     <div className="relative border box-border border-[#f6f0f6] shadow-xl">
@@ -799,6 +630,11 @@ const Visualization = (props: VisualizationProps) => {
           );
         })}
       </div>
+
+      <LevelSlider 
+        value={levelValue}
+        onChange={handleLevelChange}
+      />
 
       {/* {props.clickedNode?.name ? (
         <PreferenceSelector

@@ -95,7 +95,11 @@ def search_in_kg(kg: NutritionKG, keywords: list) -> dict:
         (u, v, data.get("relation")) for (u, v, data) in g_sub.edges(data=True)
     ]
 
-    return {"nodes": node_list, "edges": edge_list, "matches_df": final_df}
+    # Create response with node IDs and names
+    nodes = [{"id": node, "name": g_sub.nodes[node]["name"]} for node in node_list]
+    edges = [(u, v, rel) for (u, v, rel) in edge_list]
+
+    return {"nodes": nodes, "edges": edges, "matches_df": final_df}
 
 
 def generate_final_answer(
@@ -396,15 +400,102 @@ def answer_question():
         else:
             matches_data = []
 
+        # return jsonify(
+        #     {
+        #         "finalAnswer": final_answer,
+        #         "searchResult": {
+        #             "nodes": search_result["nodes"],
+        #             "edges": search_result["edges"],
+        #             "matches": matches_data,
+        #         },
+        #         "keywords": keywords,
+        #     }
+        # )
         return jsonify(
             {
                 "finalAnswer": final_answer,
-                "searchResult": {
-                    "nodes": search_result["nodes"],
-                    "edges": search_result["edges"],
-                    "matches": matches_data,
+                "knowledgeGraph": {
+                    "subject": [
+                        "枸杞大枣粥",
+                        "枸杞大枣粥",
+                        "枸杞大枣粥",
+                        "枸杞大枣粥",
+                        "枸杞大枣粥",
+                        "枸杞大枣粥",
+                        "莲子百合小米粥",
+                        "莲子百合小米粥",
+                        "莲子百合小米粥",
+                        "莲子百合小米粥",
+                        "莲子百合小米粥",
+                        "莲子百合小米粥",
+                        "百合银耳羹",
+                        "百合银耳羹",
+                        "百合银耳羹",
+                        "百合银耳羹",
+                        "百合银耳羹",
+                        "百合银耳羹",
+                    ],
+                    "relation": [
+                        "功效",
+                        "功效",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                        "功效",
+                        "功效",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                        "功效",
+                        "功效",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                        "食物构成",
+                    ],
+                    "object": [
+                        "补血益气",
+                        "宁心安神",
+                        "大米",
+                        "枸杞",
+                        "红枣",
+                        "清水",
+                        "清心除烦",
+                        "养血安神",
+                        "小米",
+                        "干莲子",
+                        "干百合",
+                        "清水",
+                        "润肺除躁热",
+                        "安神助眠",
+                        "干百合",
+                        "干银耳",
+                        "冰糖",
+                        "清水",
+                    ],
+                    "cat": [
+                        "功效",
+                        "功效",
+                        "A1",
+                        "A3",
+                        "A3",
+                        "D",
+                        "功效",
+                        "功效",
+                        "A1",
+                        "A3",
+                        "A3",
+                        "D",
+                        "功效",
+                        "功效",
+                        "A2",
+                        "A2",
+                        "D",
+                        "D",
+                    ],
                 },
-                "keywords": keywords,
             }
         )
 

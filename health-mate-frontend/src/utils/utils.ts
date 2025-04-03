@@ -44,54 +44,60 @@ export const isNodeInsideSliceArray = (slicedArray: any, node: any) => {
 export const isSubset = (array1: any, array2: any) =>
   array1.every((element: any) => array2.includes(element));
 
-export const generateMentionedDataset = (mentionedNodes: any, rawData: any) => {
-  const { nodes, links } = rawData;
+export const generateMentionedDataset = (mentionedNodes: any[], data: any) => {
+  // Create a Set of mentioned node IDs for faster lookup
+  const mentionedNodeIds = new Set(mentionedNodes.map(node => node.id));
 
-  const newNodes: any = [],
-    newLinks: any = [];
+  // Filter nodes to only include mentioned nodes
+  const filteredNodes = data.nodes.filter((node: any) => 
+    mentionedNodeIds.has(node.id)
+  );
 
-  const allIds = mentionedNodes.map((node: any) => node.id);
+  // Filter links to only include those connected to mentioned nodes
+  const filteredLinks = data.links.filter((link: any) => 
+    mentionedNodeIds.has(link.source) && mentionedNodeIds.has(link.target)
+  );
 
-  links.forEach((link: any) => {
-    const sourceTargetIds = [link.source.id, link.target.id];
-    const mentionedNodeIds = mentionedNodes.map((node: any) => node.id);
-    if (isSubset(sourceTargetIds, mentionedNodeIds)) {
-      newLinks.push(link);
-    }
-  });
-
-  const uniqueIds = [...new Set(allIds)];
-  uniqueIds.forEach((uniqueId) => {
-    const uniqueNode = nodes.find((node: any) => node.id === uniqueId);
-    newNodes.push(uniqueNode);
-  });
   return {
-    nodes: newNodes,
-    links: newLinks,
+    nodes: filteredNodes,
+    links: filteredLinks
   };
 };
 
-export const generateSelectedDataset = (selectedId: any, rawData: any) => {
-  const { nodes, links } = rawData;
+export const generateSelectedDataset = (selectedId: number, data: any) => {
+  // Create a Set of selected node ID for faster lookup
+  const selectedNodeId = new Set([selectedId]);
 
-  const newNodes: any = [],
-    newLinks: any = [],
-    allIds: any = [];
+  // Find all connected nodes
+  const connectedNodeIds = new Set([selectedId]);
+  let changed = true;
 
-  links.forEach((link: any) => {
-    if (link.source.id === selectedId || link.target.id === selectedId) {
-      newLinks.push(link);
-      allIds.push(link.source.id, link.target.id);
-    }
-  });
+  while (changed) {
+    changed = false;
+    data.links.forEach((link: any) => {
+      if (connectedNodeIds.has(link.source) && !connectedNodeIds.has(link.target)) {
+        connectedNodeIds.add(link.target);
+        changed = true;
+      }
+      if (connectedNodeIds.has(link.target) && !connectedNodeIds.has(link.source)) {
+        connectedNodeIds.add(link.source);
+        changed = true;
+      }
+    });
+  }
 
-  const uniqueIds = [...new Set(allIds)];
-  uniqueIds.forEach((uniqueId) => {
-    const uniqueNode = nodes.find((node: any) => node.id === uniqueId);
-    newNodes.push(uniqueNode);
-  });
+  // Filter nodes to only include connected nodes
+  const filteredNodes = data.nodes.filter((node: any) => 
+    connectedNodeIds.has(node.id)
+  );
+
+  // Filter links to only include those between connected nodes
+  const filteredLinks = data.links.filter((link: any) => 
+    connectedNodeIds.has(link.source) && connectedNodeIds.has(link.target)
+  );
+
   return {
-    nodes: newNodes,
-    links: newLinks,
+    nodes: filteredNodes,
+    links: filteredLinks
   };
 };

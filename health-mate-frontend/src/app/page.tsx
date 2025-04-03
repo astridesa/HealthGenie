@@ -307,6 +307,7 @@ const App = () => {
           onSendMessage={() => {}}
           isLoading={false}
           currentHistory={currentHistory}
+          setVisData={setVisData}
         />
       </div>
 

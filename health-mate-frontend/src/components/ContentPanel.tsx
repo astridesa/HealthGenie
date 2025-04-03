@@ -17,24 +17,42 @@ interface HistoryItem {
 
 interface ContentPanelProps {
   data: any;
-  selectedId: string | null;
-  localHistory: ChatSession[];
-  setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
+  selectedId: number | null;
+  localHistory: any[];
+  setLocalHistory: React.Dispatch<React.SetStateAction<any[]>>;
   chats: any[];
-  setChats: (chats: any[]) => void;
+  setChats: React.Dispatch<React.SetStateAction<any[]>>;
   slideValue: number;
   recommendQuery: string;
-  setRecommendQuery: (query: string) => void;
-  onSendMessage: (message: string) => void;
+  setRecommendQuery: React.Dispatch<React.SetStateAction<string>>;
+  onSendMessage: () => void;
   isLoading: boolean;
   handleMentionNode: (nodes: any[], keywordNodes: any[]) => void;
-  setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
+  setSelectedId: React.Dispatch<React.SetStateAction<number | null>>;
   clickedNode: any;
   currentHistory: string;
-  showRelatedNode: (node: any) => void;
+  showRelatedNode: (slide: number) => void;
   cancel: () => void;
   setClickedNode: React.Dispatch<React.SetStateAction<any>>;
   localUserId: string;
+  setVisData: React.Dispatch<React.SetStateAction<any>>;
+}
+
+interface KnowledgeGraphNode {
+  id: number;
+  name: string;
+}
+
+interface KnowledgeGraphEdge {
+  [0]: number;  // source
+  [1]: number;  // target
+  [2]: string;  // relation
+}
+
+interface KnowledgeGraphResponse {
+  subject: string[];
+  relation: string[];
+  object: string[];
 }
 
 const sendRecommendationHistory = async (currentHistory: string, localUserId: string) => {
@@ -144,7 +162,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   selectedId,
   localHistory,
   setLocalHistory,
-  chats = [],
+  chats,
   setChats,
   slideValue,
   recommendQuery,
@@ -159,6 +177,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   cancel,
   setClickedNode,
   localUserId,
+  setVisData
 }) => {
   const [inputValue, setInputValue] = useState("");
   const scrollableChatBox = useRef<HTMLDivElement>(null);
@@ -173,6 +192,9 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
     "accept" | "reject" | null
   >(null);
 
+  const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     if (scrollableChatBox.current) {
       const lastChatBox = (scrollableChatBox.current as HTMLElement)
@@ -186,7 +208,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   const mutation = useMutation({
     mutationFn: sendQuestion,
     onSuccess: async (successData) => {
-      const { finalAnswer, searchResult, keywords } = successData;
+      const { finalAnswer, knowledgeGraph } = successData;
 
       const answer = {
         from: "bot",
@@ -194,41 +216,81 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         id: uuidv4(),
       };
 
-      setChats([...chats, answer]);
+      setChats(prevChats => [...prevChats, answer]);
 
       // Write both user message and bot response to history
       await writeChatToHistory(userInput, "chat", localUserId);
       await writeChatToHistory(finalAnswer, "chat", localUserId);
 
-      const targetIds = data.nodes
-        .filter((node: any) => {
-          return keywords.some(
-            (keyword: string) =>
-              keyword.includes(node.chinese) || node.chinese.includes(keyword),
-          );
-        })
-        .map((n: any) => n.id);
+      // Process knowledge graph data if available
+      if (knowledgeGraph) {
+        // Create unique IDs for nodes
+        const nodeMap = new Map<string, number>();
+        let nextId = 1;
 
-      const keywordNodes = [...targetIds];
+        // Helper function to get or create node ID
+        const getNodeId = (name: string) => {
+          if (!nodeMap.has(name)) {
+            nodeMap.set(name, nextId++);
+          }
+          return nodeMap.get(name)!;
+        };
 
-      targetIds.forEach((id: any) => {
-        data.links.forEach((link: any) => {
-          if (link.source.id === id) {
-            targetIds.push(link.target.id);
-          }
-          if (link.target.id === id) {
-            targetIds.push(link.source.id);
-          }
+        // Create nodes from unique subjects and objects
+        const uniqueNodes = new Set([...knowledgeGraph.subject, ...knowledgeGraph.object]);
+        const nodes = Array.from(uniqueNodes).map(name => {
+          const id = getNodeId(name);
+          // Find the category from the backend data
+          const category = knowledgeGraph.cat?.[knowledgeGraph.object.indexOf(name)] || 
+                          (name.includes('功效') ? 'effect' : 'menu');
+          return {
+            id,
+            name,
+            chinese: name,
+            category: category === '功效' ? 'effect' : category,  // Convert '功效' to 'effect'
+            isShared: false,
+            // Add random initial positions to help with force layout
+            x: Math.random() * 500,
+            y: Math.random() * 500
+          };
         });
-      });
 
-      const uniqueTargetIds = [...new Set(targetIds)];
+        // Create links from the triples
+        const links = knowledgeGraph.subject.map((subject: string, index: number) => {
+          const sourceId = getNodeId(subject);
+          const targetId = getNodeId(knowledgeGraph.object[index]);
+          return {
+            source: sourceId,
+            target: targetId,
+            relation: knowledgeGraph.relation[index],
+            isShared: false,
+            index
+          };
+        });
 
-      const mentionedNodes = data.nodes.filter((node: any) => {
-        return uniqueTargetIds.includes(node.id);
-      });
+        // Create new visualization data
+        const newVisData = { 
+          nodes,
+          links
+        };
 
-      handleMentionNode(mentionedNodes, keywordNodes);
+        // Update visualization data
+        if (typeof setVisData === 'function') {
+          // First clear the existing data
+          setVisData({ nodes: [], links: [] });
+          
+          // Then set the new data after a brief delay to ensure clean transition
+          setTimeout(() => {
+            setVisData(newVisData);
+          }, 50);
+        } else {
+          console.error('setVisData is not a function');
+        }
+        
+        // Update mentioned nodes for highlighting
+        const mentionedNodeIds = nodes.map(node => node.id);
+        handleMentionNode(nodes, mentionedNodeIds);
+      }
 
       setUserInput("");
       setWaitingReponse(false);
@@ -244,7 +306,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         content: `Sorry, I encountered an error: ${error.message || "Unknown error occurred"}`,
         id: uuidv4(),
       };
-      setChats([...chats, errorMessage]);
+      setChats(prevChats => [...prevChats, errorMessage]);
       
       // Write both user message and error response to history
       await writeChatToHistory(userInput, "chat", localUserId);
@@ -291,6 +353,130 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
       // Add any additional recommendation logic here
     } catch (error) {
       console.error("Error recording recommendation:", error);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!message.trim()) return;
+
+    setIsSubmitting(true);
+    const userMessage = message;
+    setMessage("");
+
+    // Add user message to chat
+    const newChat = {
+      from: "user",
+      content: userMessage,
+      time: new Date().toISOString(),
+    };
+    setChats(prevChats => [...prevChats, newChat]);
+
+    try {
+      const response = await fetch(`${SERVER_URL}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          userId: localUserId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+
+      const data = await response.json();
+      
+      // Add AI response to chat
+      const aiChat = {
+        from: "ai",
+        content: data.finalAnswer,
+        time: new Date().toISOString(),
+      };
+      setChats(prevChats => [...prevChats, aiChat]);
+
+      // Process knowledge graph data
+      if (data.knowledgeGraph) {
+        // Create unique IDs for nodes
+        const nodeMap = new Map<string, number>();
+        let nextId = 1;
+
+        // Helper function to get or create node ID
+        const getNodeId = (name: string) => {
+          if (!nodeMap.has(name)) {
+            nodeMap.set(name, nextId++);
+          }
+          return nodeMap.get(name)!;
+        };
+
+        // Create nodes from unique subjects and objects
+        const uniqueNodes = new Set([...data.knowledgeGraph.subject, ...data.knowledgeGraph.object]);
+        const nodes = Array.from(uniqueNodes).map(name => {
+          const id = getNodeId(name);
+          // Find the category from the backend data
+          const category = data.knowledgeGraph.cat?.[data.knowledgeGraph.object.indexOf(name)] || 
+                          (name.includes('功效') ? 'effect' : 'menu');
+          return {
+            id,
+            name,
+            chinese: name,
+            category: category === '功效' ? 'effect' : category,  // Convert '功效' to 'effect'
+            isShared: false,
+            // Add random initial positions to help with force layout
+            x: Math.random() * 500,
+            y: Math.random() * 500
+          };
+        });
+
+        // Create links from the triples
+        const links = data.knowledgeGraph.subject.map((subject: string, index: number) => {
+          const sourceId = getNodeId(subject);
+          const targetId = getNodeId(data.knowledgeGraph.object[index]);
+          return {
+            source: sourceId,
+            target: targetId,
+            relation: data.knowledgeGraph.relation[index],
+            isShared: false,
+            index
+          };
+        });
+
+        // Create new visualization data
+        const newVisData = { 
+          nodes,
+          links
+        };
+
+        // Update visualization data
+        if (typeof setVisData === 'function') {
+          // First clear the existing data
+          setVisData({ nodes: [], links: [] });
+          
+          // Then set the new data after a brief delay to ensure clean transition
+          setTimeout(() => {
+            setVisData(newVisData);
+          }, 50);
+        } else {
+          console.error('setVisData is not a function');
+        }
+        
+        // Update mentioned nodes for highlighting
+        const mentionedNodeIds = nodes.map(node => node.id);
+        handleMentionNode(nodes, mentionedNodeIds);
+      }
+
+    } catch (error) {
+      console.error("Error:", error);
+      const errorChat = {
+        from: "ai",
+        content: "Sorry, there was an error processing your request.",
+        time: new Date().toISOString(),
+      };
+      setChats(prevChats => [...prevChats, errorChat]);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
