@@ -168,21 +168,27 @@ const Visualization = (props: VisualizationProps) => {
   };
 
   const renderLinks = (links: any, update: any) => {
-    d3.select("g.links")
+    // First remove any existing links
+    d3.select(d3Container.current)
+      .select("g.links")
       .selectAll("line")
-      .data(links, (link: any) => link.index)
+      .data(links, (data: any) => data.index)
       .exit()
       .remove();
 
-    d3.select("g.links")
+    // Then add new links
+    d3.select(d3Container.current)
+      .select("g.links")
       .selectAll("line")
-      .data(links, (link: any) => link.index)
+      .data(links, (data: any) => data.index)
       .enter()
       .append("line")
       .attr("stroke", "#E5EAEB")
-      .attr("stroke-width", "1px")
-      .attr("stroke-opacity", (d) => {
-        return 1;
+      .attr("stroke-width", (d: any) => {
+        return d.relation === "功效" ? "2px" : "1px";
+      })
+      .attr("stroke-dasharray", (d: any) => {
+        return d.relation === "功效" ? "5,5" : "none";
       })
       .attr("marker-end", "url(#arrowhead)")
       .call(update);
@@ -195,51 +201,28 @@ const Visualization = (props: VisualizationProps) => {
   };
 
   const renderLinkLabels = (links: any) => {
-    d3.select("g.linkLabels")
-      .selectAll("text")
-      .data(links, (link: any) => link.index)
-      .exit()
-      .remove();
-
-    d3.select("g.linkLabels")
-      .selectAll("line")
-      .data(links, (link: any) => link.index)
-      .exit()
-      .remove();
-
-    const texts = d3
+    // First remove any existing labels
+    d3.select(d3Container.current)
       .select("g.linkLabels")
       .selectAll("text")
-      .data(links, (link: any) => link.index)
+      .data(links, (data: any) => data.index)
+      .exit()
+      .remove();
+
+    // Then add new labels
+    d3.select(d3Container.current)
+      .select("g.linkLabels")
+      .selectAll("text")
+      .data(links, (data: any) => data.index)
       .enter()
       .append("text")
-      .text((d: any, i) => d.relation)
-      .style("fill", "#012027")
-      .style("opacity", 1)
-      .style("font-size", 12)
+      .attr("fill", "#8d8d8d")
+      .attr("font-size", (d: any) => {
+        return d.relation === "功效" ? "12px" : "10px";
+      })
+      .text((d: any) => d.relation)
       .style("pointer-events", "none")
       .call(updateLinkLabel);
-
-    const lines = d3
-      .select("g.linkLabels")
-      .selectAll("line")
-      .data(links, (link: any) => link.index)
-      .enter()
-      .append("line");
-
-    texts.each(function (_, i) {
-      const bbox = this.getBBox();
-
-      lines
-        .filter((_, j) => i === j)
-        .attr("x1", bbox.x)
-        .attr("y1", bbox.y + bbox.height + 1) // 调整线条的垂直位置
-        .attr("x2", bbox.x + bbox.width)
-        .attr("y2", bbox.y + bbox.height + 1)
-        .style("stroke", "#bdbde9")
-        .style("stroke-width", 1)
-        .call(updateLinkLabel);
-    });
   };
 
   const updateNode = (node: any) => {
@@ -252,15 +235,17 @@ const Visualization = (props: VisualizationProps) => {
     label.attr("transform", function (d: any) {
       const diffX = d.target.x - d.source.x;
       const diffY = d.target.y - d.source.y;
-
-      return (
-        "translate(" +
-        (d.source.x + 0.7 * diffX) +
-        "," +
-        (d.source.y + 0.7 * diffY) +
-        ")"
-      );
-    });
+      const angle = Math.atan2(diffY, diffX) * 180 / Math.PI;
+      
+      // Position the label at the middle of the link
+      const x = d.source.x + 0.5 * diffX;
+      const y = d.source.y + 0.5 * diffY;
+      
+      // Rotate the label to align with the link
+      return `translate(${x},${y}) rotate(${angle})`;
+    })
+    .attr("text-anchor", "middle") // Center the text
+    .attr("dy", "0.35em"); // Adjust vertical position
   };
 
   /* The useEffect Hook is for running side effects outside of React,
@@ -303,6 +288,21 @@ const Visualization = (props: VisualizationProps) => {
           .forceSimulation(label.nodes)
           .force("charge", d3.forceManyBody().strength(-50))
           .force("link", d3.forceLink(label.links).distance(0).strength(2));
+
+        const simulation = d3
+          .forceSimulation(graph.nodes)
+          .force(
+            "link",
+            d3
+              .forceLink(graph.links)
+              .id((d: any) => d.id)
+              .distance(150)
+          )
+          .force("charge", d3.forceManyBody().strength(-300))
+          .force("center", d3.forceCenter(width / 2, height / 2))
+          .force("collision", d3.forceCollide().radius(60))
+          .force("x", d3.forceX(width / 2).strength(0.1))
+          .force("y", d3.forceY(height / 2).strength(0.1));
 
         const graphLayout = d3
           .forceSimulation(graph.nodes)
@@ -352,10 +352,10 @@ const Visualization = (props: VisualizationProps) => {
         // union_annotation
         const container = svg.append("g").attr("class", "containerGroup");
 
-        const zoom = (d3 as any)
-          .zoom()
-          .scaleExtent([0.1, 5])
-          .on("zoom", function (event: any) {
+        const zoom = d3
+          .zoom<SVGSVGElement, unknown>()
+          .scaleExtent([0.1, 4])
+          .on("zoom", (event) => {
             container.attr("transform", event.transform);
           });
 
@@ -416,27 +416,16 @@ const Visualization = (props: VisualizationProps) => {
 
         const initTexts = linkLabelGroup
           .selectAll("text")
-          .data(
-            props.selectedId
-              ? props.selectedId > 0
-                ? topThreeHundredLinks.slice(
-                    0,
-                    topThreeHundredLinks.length / 10,
-                  )
-                : topThreeHundredLinks.slice(
-                    0,
-                    Math.max(1, topThreeHundredLinks.length / 10),
-                  )
-              : [],
-            (link: any) => link.index,
-          )
+          .data([], (link: any) => link.index) // Start with empty data
           .enter()
           .append("text")
+          .attr("fill", "#8d8d8d")
+          .attr("font-size", (d: any) => {
+            return d.relation === "功效" ? "12px" : "10px";
+          })
           .text((d: any) => d.relation)
-          .style("fill", "#012027")
-          .style("opacity", 1)
-          .style("font-size", 12)
-          .style("pointer-events", "none");
+          .style("pointer-events", "none")
+          .call(updateLinkLabel);
 
         const initLines = linkLabelGroup
           .selectAll("line")
@@ -620,9 +609,7 @@ const Visualization = (props: VisualizationProps) => {
 
         function focus(event: any, d: any) {
           const id = d.id;
-
           const relatedNodes = [d];
-
           let relatedLinks: any = [];
 
           graph.links.forEach((link: any) => {
@@ -641,38 +628,21 @@ const Visualization = (props: VisualizationProps) => {
           relatedLinks = processDuplicates(relatedLinks);
 
           easyRenderNodes(relatedNodes, topTenNodes, props.keywordNodes);
-
           renderLinks(relatedLinks, updateLink);
-
-          renderNodeLabels((d: any) =>
-            neigh(id, d.node.id) ? "block" : "none",
-          );
-
-          if (props.selectedId !== id) {
-            renderLinkLabels(relatedLinks);
-          }
+          renderNodeLabels((d: any) => neigh(id, d.node.id) ? "block" : "none");
+          renderLinkLabels(relatedLinks); // Show labels only for related links on hover
         }
 
         function unfocus() {
           const defaultDisplayLinks = props.selectedId
             ? props.selectedId > 0
               ? topThreeHundredLinks.slice(0, topThreeHundredLinks.length / 10)
-              : topThreeHundredLinks.slice(
-                  0,
-                  Math.max(1, topThreeHundredLinks.length / 10),
-                )
-            : [];
+              : topThreeHundredLinks.slice(0, Math.max(1, topThreeHundredLinks.length / 10))
+            : topThreeHundredLinks;
 
-          renderLinkLabels(defaultDisplayLinks);
-
-          easyRenderNodes(
-            topThreeHundredNodes,
-            topTenNodes,
-            props.keywordNodes,
-          );
-
+          renderLinkLabels([]); // Hide all labels when not hovering
+          easyRenderNodes(topThreeHundredNodes, topTenNodes, props.keywordNodes);
           renderLinks(topThreeHundredLinks, updateLink);
-
           renderNodeLabels("display");
         }
 

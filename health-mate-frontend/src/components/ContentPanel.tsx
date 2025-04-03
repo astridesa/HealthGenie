@@ -68,9 +68,9 @@ const sendRecommendationHistory = async (currentHistory: string, localUserId: st
   }
 };
 
-const sendQuestion = async ({ inputValue, clickedNode }: any) => {
+const sendQuestion = async ({ inputValue }: any) => {
   try {
-    console.log("Sending question:", { inputValue, clickedNode }); // Debug log
+    console.log("Sending question:", { inputValue }); // Debug log
     console.log("Server URL:", SERVER_URL); // Log the server URL being used
     
     const response = await fetch(`${SERVER_URL}/api/question`, {
@@ -82,7 +82,6 @@ const sendQuestion = async ({ inputValue, clickedNode }: any) => {
       credentials: "include",
       body: JSON.stringify({
         question: inputValue,
-        clickedNode,
       }),
     });
 
@@ -278,7 +277,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
 
   const sendQuestionToBot = async () => {
     if (!userInput.trim()) return;
-    mutation.mutate({ inputValue: userInput, clickedNode });
+    mutation.mutate({ inputValue: userInput });
   };
 
   useEffect(() => {

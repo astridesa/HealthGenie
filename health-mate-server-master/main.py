@@ -357,8 +357,7 @@ def answer_question():
             logger.error("Empty question received")
             return jsonify({"error": "Question is required"}), 400
 
-        clicked_node = data.get("clickedNode", None)
-        logger.info(f"Processing question: {question}, clicked_node: {clicked_node}")
+        logger.info(f"Processing question: {question}")
 
         # Extract keywords from the question
         try:

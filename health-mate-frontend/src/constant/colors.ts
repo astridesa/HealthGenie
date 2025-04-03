@@ -39,6 +39,11 @@ export const colors = [
     color: "rgb(182,136,203)",
     content: "Condiments"
   },
+  {
+    category: "effect",
+    color: "rgb(246,216,214)",
+    content: "Effects"
+  }
 ];
 
 export const getCategoryColor = (type: string) => {
