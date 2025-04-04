@@ -67,7 +67,8 @@ const sendRecommendationHistory = async (currentHistory: string, localUserId: st
       credentials: "include",
       body: JSON.stringify({
         nodeName: currentHistory,
-        type: "recommendation"
+        type: "recommendation",
+        userId: localUserId
       }),
     });
 
@@ -163,22 +164,27 @@ const sendQuestion = async ({ inputValue, userId }: any) => {
 
 const writeChatToHistory = async (content: string, type: string, localUserId: string) => {
   try {
+    const historyData = {
+      id: localUserId,
+      type: type,
+      content: content,
+      time: new Date().toISOString(),
+    };
+
     const response = await fetch(`${SERVER_URL}/api/history`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        id: localUserId,
-        type: type,
-        content: content,
-        time: new Date().toISOString(),
-      }),
+      body: JSON.stringify(historyData),
     });
 
     if (!response.ok) {
       throw new Error("Failed to write chat history");
     }
+
+    const responseData = await response.json();
+    console.log("History write response:", responseData); // Debug log
   } catch (error) {
     console.error("Error writing chat history:", error);
   }
@@ -222,6 +228,8 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
+
   useEffect(() => {
     if (scrollableChatBox.current) {
       const lastChatBox = (scrollableChatBox.current as HTMLElement)
@@ -233,7 +241,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   }, [chats]);
 
   const mutation = useMutation({
-    mutationFn: ({ inputValue }) => sendQuestion({ inputValue, userId: localUserId }),
+    mutationFn: (variables: { inputValue: string }) => sendQuestion({ inputValue: variables.inputValue, userId: localUserId }),
     onSuccess: async (successData) => {
       const { finalAnswer, knowledgeGraph } = successData;
 
@@ -241,6 +249,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         from: "bot",
         content: finalAnswer,
         id: uuidv4(),
+        time: new Date().toISOString(),
       };
 
       setChats(prevChats => [...prevChats, answer]);
@@ -334,7 +343,6 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
 
       setUserInput("");
       setWaitingReponse(false);
-
       setSelectedId(null);
       setClickedNode(null);
     },
@@ -345,6 +353,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         from: "bot",
         content: `Sorry, I encountered an error: ${error.message || "Unknown error occurred"}`,
         id: uuidv4(),
+        time: new Date().toISOString(),
       };
       setChats(prevChats => [...prevChats, errorMessage]);
       
@@ -389,10 +398,66 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
 
   const handleRecommendationClick = async () => {
     try {
-      await sendRecommendationHistory(currentHistory, localUserId);
-      // Add any additional recommendation logic here
-    } catch (error) {
+      if (!localUserId) {
+        console.error("User ID is not available.");
+        return;
+      }
+
+      setIsRecommendationLoading(true);
+
+      const response = await fetch(`${SERVER_URL}/api/recommend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: localUserId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("Recommendation API Response:", data); // Debug log
+
+      if (!data || !data.recommendationQuery) {
+        throw new Error("No recommendation query received");
+      }
+
+      // Create a new chat message for the recommendation
+      const recommendationMessage = {
+        from: "bot",
+        content: data.recommendationQuery,
+        id: uuidv4(),
+        time: new Date().toISOString(),
+      };
+
+      // Update the chat history with the new recommendation message
+      setChats(prevChats => [...prevChats, recommendationMessage]);
+
+      // Write the recommendation to history with proper format
+      const historyData = {
+        id: localUserId,
+        type: "chat",
+        content: data.recommendationQuery,
+        time: new Date().toISOString(),
+      };
+
+      await writeChatToHistory(historyData.content, historyData.type, historyData.id);
+    } catch (error: any) {
       console.error("Error recording recommendation:", error);
+      // Add error message to chat
+      const errorMessage = {
+        from: "bot",
+        content: "Would you like to explore some healthy recipes?",
+        id: uuidv4(),
+        time: new Date().toISOString(),
+      };
+      setChats(prevChats => [...prevChats, errorMessage]);
+    } finally {
+      setIsRecommendationLoading(false);
     }
   };
 
@@ -558,7 +623,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
                   cancel={cancel}
                 />
               ))}
-              {waitingResponse ? <LinearProgress /> : null}
+              {(waitingResponse || isRecommendationLoading) ? <LinearProgress /> : null}
             </div>
           ) : (
             <div
@@ -578,7 +643,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
                 onClick={handleRecommendationClick}
                 className="w-full px-4 py-2 text-left text-md font-base border border-white rounded-lg bg-[#bf8ac1] shadow-lg focus:outline-none hover:bg-[#a67ba3] flex items-center justify-between"
               >
-                <span className="text-white">Recommendation</span>
+                <span className="text-white">Query Generation</span>
               </button>
             </div>
             <Selector

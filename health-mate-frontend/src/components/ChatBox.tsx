@@ -17,12 +17,13 @@ interface ChatBoxProps {
     id: string;
     from: string;
     content: string;
+    time?: string;
   };
-  autoCompleteResponse: string;
-  setAutoCompleteResponse: (value: string) => void;
+  autoCompleteResponse: "accept" | "reject" | null;
+  setAutoCompleteResponse: (value: "accept" | "reject" | null) => void;
   setUserInput: (value: string) => void;
   slideValue: number;
-  showRelatedNode: boolean;
+  showRelatedNode: (slide: number) => void;
   cancel: () => void;
 }
 

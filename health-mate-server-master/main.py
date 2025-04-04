@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 import openai
+import json
 import os
 import re
 import pandas as pd
@@ -295,13 +296,54 @@ def get_history():
 def recommend():
     data = request.get_json()
 
-    nodeName = data.get("nodeName", "")
-    type = data.get("type", "")
+    user_id = data.get("userId", "")
+    user_history = read_chat_session_history(user_id)
+    sys_prompt = "You are an expert in predicting user health consultation intentions, specializing in recipe recommendation systems. Your task is to analyze the user's interaction history and predict their current need, then generate an approriate open question."
+    query_recommend_prompt = """
+    
+    ### Interaction History Forma
+    1. The system helps users find recipes through a knowledge graph interface where users can include/exclude ingredients.
+    2. History records contain three fields:
+    - type: "include", "exclude", or "chat" (both user messages and assistant responses)
+    - content: The main text of the interaction
+    - time: Timestamp of the interaction
+    3. Conversations between user and assistant messages.
+    ### Task Requirement:
+    1. Carefully analyze the interaction history to understand the user's preferences and current intention.
+    2. Generate proactively open question that aligns with their demonstrated preferences, meanwhile it also keep the question open and not limited to the history.
+    3. Match the output language (Chinese/English) to the user's conversation language.
+    4. Format the output as plain text only.
+    5. Use a proactive yet gentle tone in your recommendation.
+    6. If no history exists, suggest a general recipe recommendation query.
+    ### Output format
+    1. Provide recommended query text with proactive tone, e.g. do you want to explore the recipe with xxx ingredients?
+    2. Do not include any explanations or metadata
+    ###
+    The following is the user's interaction history:
+    {interaction_history}
 
-    finalAnswer = f"The recipe that {type} {nodeName} is aaa"
-    recommendQuery = f"The recommend query is"
-
-    return jsonify({"finalAnswer": finalAnswer, "recommendQuery": recommendQuery})
+    Now please recommend the query based on user's preference and intention.
+    """
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {
+            "role": "user",
+            "content": query_recommend_prompt.format(
+                interaction_history=json.dumps(
+                    user_history, ensure_ascii=False, indent=4
+                )
+            ),
+        },
+    ]
+    try:
+        response = openai.ChatCompletion.create(
+            engine=deployment, messages=messages, temperature=0.7, max_tokens=100
+        )
+        response = response.choices[0].message.content.strip()
+    except:
+        response = "Please recommend some healthy recipe."
+    print(response)
+    return jsonify({"recommendationQuery": response})
 
 
 @app.route("/api/question", methods=["POST"])
@@ -504,10 +546,65 @@ def read_kg_files():
         return {"subject": [], "relation": [], "object": [], "cat": []}
 
 
+def read_chat_session_history(user_id: str) -> list:
+    """
+    Read the chat session history for a given user ID and return records
+    where the final chat content is "New chat session".
+
+    Args:
+        user_id (str): The user ID to read history for
+
+    Returns:
+        list: A list of history records where the final chat content is "New chat session"
+    """
+    try:
+        user_history_path = get_user_history_path(user_id)
+
+        if not user_history_path.exists():
+            logger.info(f"No history file found for user {user_id}")
+            return []
+
+        # Read all records
+        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
+            reader = csv.reader(file)
+            rows = list(reader)
+
+        if not rows:
+            logger.info(f"History file for user {user_id} is empty.")
+            return []
+
+        # Skip header row
+        history_rows = rows[1:]
+
+        # Process rows in reverse to find the most recent "New chat session"
+        result = []
+        found_new_session = False
+        for row in reversed(history_rows):
+            if len(row) == 3:
+                type_, content, time = row
+                if type_ == "chat" and content == "New chat session":
+                    break
+                else:
+                    result.append({"type": type_, "content": content, "time": time})
+                    # Stop when we find the first "New chat session" and subsequent records
+
+        # Return in chronological order
+        result_json = {}
+        result_json["type"] = [r["type"] for r in reversed(result)]
+        result_json["content"] = [r["content"] for r in reversed(result)]
+        result_json["time"] = [r["time"] for r in reversed(result)]
+        return result_json
+    except Exception as e:
+        logger.error(f"Error reading chat session history: {str(e)}")
+        return []
+
+
 # Test connection when server starts
 if __name__ == "__main__":
     if not test_azure_connection():
         logger.error(
             "Failed to connect to Azure OpenAI API. Server will start but API calls may fail."
         )
+    app.run(host="0.0.0.0", port=5001, debug=True)
+
     app.run(host="0.0.0.0", port=5001, debug=True)
