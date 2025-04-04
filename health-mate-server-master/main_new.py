@@ -19,24 +19,18 @@ subscription_key = os.getenv(
 openai.api_type = "azure"
 openai.api_base = endpoint
 openai.api_key = subscription_key
-openai.api_version = "2024-05-01-preview"
+openai.api_version = "2023-03-15-preview"
 
 # --------------------- 2. Global CSV Path ---------------------
 CSV_PATH = "./merged_cleaned_all_recipes.csv"
 
 def init_history_file():
-    """
-    为本次会话生成一个独立的history文件，形如 .history_20230405_153210.csv
-    这样不同的代码运行(对话窗口)不会互相干扰。
-    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     global HISTORY_CSV
     HISTORY_CSV = f".history_{timestamp}.csv"
-    # 初始化该文件
     if not os.path.exists(HISTORY_CSV):
         df = pd.DataFrame(columns=["round", "type", "content", "time"])
         df.to_csv(HISTORY_CSV, index=False, encoding="utf-8-sig")
-
 
 # --------------------- 3. NutritionKG Class ---------------------
 class NutritionKG:
@@ -49,10 +43,6 @@ class NutritionKG:
         object_filter: str = None,
         exact_relation: bool = True,
     ) -> pd.DataFrame:
-        """
-        在大 CSV 上分块搜索符合条件的 (subject, relation, object) 三元组，
-        额外保留其在原始 CSV 中的行号 csv_idx，用于后续英文行的检索。
-        """
         usecols = ["subject", "relation", "object"]
         chunksize = 100_000
         matched_df_list = []
@@ -91,19 +81,14 @@ class NutritionKG:
         return final_df
 
     def get_all_triples_for_subject(self, subject_str: str) -> pd.DataFrame:
-        """
-        获取给定subject在CSV中出现的所有三元组，并保留csv_idx。
-        """
-        usecols = ["subject", "relation", "object"]
         chunksize = 100_000
         matched_df_list = []
-
         offset = 0
         chunks = pd.read_csv(self.csv_path, chunksize=chunksize, dtype=str)
         for chunk in chunks:
             chunk.reset_index(drop=False, inplace=True)
             chunk["csv_idx"] = chunk["index"] + offset
-            sub_chunk = chunk[usecols + ["csv_idx"]].copy()
+            sub_chunk = chunk[["subject", "relation", "object", "csv_idx"]].copy()
 
             sub_chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
             temp_df = sub_chunk[sub_chunk["subject"] == subject_str]
@@ -131,13 +116,8 @@ class NutritionKG:
         return g_sub
 
     def get_full_data_for_subject(self, subject_str: str) -> pd.DataFrame:
-        """
-        返回CSV中所有 subject==subject_str 的完整记录(不仅 subject, relation, object)，
-        并保留 csv_idx 以便后续英文行查找。
-        """
         chunksize = 100_000
         matched_df_list = []
-
         offset = 0
         chunks = pd.read_csv(self.csv_path, chunksize=chunksize, dtype=str)
         for chunk in chunks:
@@ -156,7 +136,6 @@ class NutritionKG:
             final_df = pd.DataFrame()
 
         return final_df
-
 
 # --------------------- 4. Prompts & Functions for TCM Keywords Extraction ---------------------
 KEYWORD_SYSTEM_PROMPT = """1. 【角色设定】 你是一位资深的食药同源中医专家，拥有丰富的中医理论知识与实践经验。
@@ -202,7 +181,6 @@ def extract_keywords(user_question: str) -> list:
     matches = re.findall(pattern, raw_text)
     return matches
 
-
 # --------------------- 5. Prompt & Function for Final Explanation (Chinese) ---------------------
 MODERN_STYLE_SYSTEM_PROMPT = r"""你是一位专业营养师和医学顾问，但请勿显式提及任何传统中医概念或用语。你需要从现代医学、全球化饮食与营养学的角度，为用户给出专业又通俗易懂的建议。你已获得以下信息：
 1. 用户最初提出的健康/症状问题
@@ -228,12 +206,7 @@ MODERN_STYLE_SYSTEM_PROMPT = r"""你是一位专业营养师和医学顾问，�
 def generate_final_explanation(
     user_question: str, keywords: list, recommended_names: list, subgraph_texts: list
 ) -> str:
-    """
-    recommended_names: 最终要给用户展示的3道菜的名字(确保和CSV文件里一致)。
-    subgraph_texts: 构建子图以便给GPT作为参考。
-    """
     combined_subgraphs = "\n\n".join(subgraph_texts)
-    # 在prompt中明确列出这3道菜
     recommended_str = "\n".join(
         f"{i+1}. {name}" for i, name in enumerate(recommended_names)
     )
@@ -264,7 +237,6 @@ def generate_final_explanation(
         final_answer = "对不起，生成回答时发生错误。"
     return final_answer
 
-
 # --------------------- 6. Translation if mostly English ---------------------
 TRANSLATION_SYSTEM_PROMPT = """You are a professional English translator.
 Please translate the following Chinese text (including any Markdown code blocks) into clear, coherent English.
@@ -287,37 +259,29 @@ def translate_to_english(chinese_text: str) -> str:
     except Exception:
         return "Sorry, translation error occurred."
 
-
 # --------------------- 7. Save CSV for top 3 recommended recipes ---------------------
 def clear_old_kg_files():
-    """
-    在将新推荐菜谱写入 KG1.csv, KG2.csv, KG3.csv 之前，
-    先删除旧的这三个文件（若存在）。
-    """
     for i in range(1, 4):
         fname = f"KG{i}.csv"
         if os.path.exists(fname):
             os.remove(fname)
 
 def self_save_full_subject_csv(
-    nutri_kg, subject_name: str, rank_id: int, is_english: bool = False
+    nutrition_kg: NutritionKG, subject_name: str, rank_id: int, is_english: bool = False
 ) -> (pd.DataFrame, str):
     """
-    读取 subject_name 对应的所有行 (包括csv_idx)，若is_english，则获取该行+1处(若存在)的英文行。
-    返回 (最终DataFrame, 最终展示名称display_name)：
-       - DataFrame: 已写入的那道菜所有行
-       - display_name: 要给用户展示(回答中用)的菜名
+    根据 subject_name 获取所有行并写入 KG{rank_id}.csv。
+    若 is_english=True，则尝试查找其英文行(行号+1)并覆盖保存。
+    返回 (最终DataFrame, 用于在回答中显示的菜名)。
     """
-    full_df = nutri_kg.get_full_data_for_subject(subject_name)
+    full_df = nutrition_kg.get_full_data_for_subject(subject_name)
     if full_df.empty:
-        return full_df, subject_name  # 没找到就还是返回原名
+        return full_df, subject_name  # 没找到就原名
 
-    display_name = subject_name  # 默认用中文名
+    display_name = subject_name
     if is_english:
-        # 尝试读取CSV并找英文版subject
-        all_data = pd.read_csv(nutri_kg.csv_path, dtype=str)
-        all_data.reset_index(drop=False, inplace=True)  # index是0~N
-        # 英文行
+        all_data = pd.read_csv(nutrition_kg.csv_path, dtype=str)
+        all_data.reset_index(drop=False, inplace=True)
         new_df_list = []
         for _, row in full_df.iterrows():
             real_idx = row["csv_idx"]
@@ -328,16 +292,14 @@ def self_save_full_subject_csv(
         if new_df_list:
             english_full_df = pd.concat(new_df_list, ignore_index=True).drop_duplicates()
             if not english_full_df.empty:
-                # 取第一条行中的 subject 作为展示用
-                disp_subj_series = english_full_df["subject"].dropna().unique()
-                if len(disp_subj_series) > 0:
-                    display_name = disp_subj_series[0]
-            full_df = english_full_df  # 以英文版记录覆盖
+                subj_list = english_full_df["subject"].dropna().unique()
+                if len(subj_list) > 0:
+                    display_name = subj_list[0]
+            full_df = english_full_df
 
     filename = f"KG{rank_id}.csv"
     full_df.to_csv(filename, index=False, encoding="utf-8-sig")
     return full_df, display_name
-
 
 # --------------------- 8. Multi-round History and Main Chat Loop ---------------------
 def append_history(round_id: int, record_type: str, content: str):
@@ -358,9 +320,6 @@ def load_latest_round():
     return df["round"].max()
 
 def detect_language(user_text: str) -> bool:
-    """
-    若英文字符比中文字符更多，则判定为英文输入。
-    """
     en_count = len(re.findall(r"[A-Za-z]", user_text))
     zh_count = len(re.findall(r"[\u4E00-\u9FFF]", user_text))
     return en_count > zh_count
@@ -374,18 +333,81 @@ def get_top50_subjects(df: pd.DataFrame) -> list:
     top_subs = [item[0] for item in subject_counts[:50]]
     return top_subs
 
+def is_english_word(text: str) -> bool:
+    en_count = len(re.findall(r"[A-Za-z]", text))
+    zh_count = len(re.findall(r"[\u4E00-\u9FFF]", text))
+    return en_count > zh_count
+
+def map_english_ingredients_to_chinese(ings: list, csv_path: str) -> (list, dict):
+    """
+    将英文食材映射到对应的中文名称(若数据库有)，返回 (转换后列表, 映射字典)
+    - 在此函数中加入详细打印信息，方便排查搜不到/映射失败的原因。
+    """
+    if not ings:
+        return ings, {}
+
+    big_df = pd.read_csv(csv_path, dtype=str)
+    big_df.reset_index(drop=False, inplace=True)
+    # big_df = big_df[big_df["relation"] == "Ingredient"].copy()
+
+    big_df = big_df[
+    (big_df["relation"] == "Ingredient") | 
+    (big_df["relation"] == "食谱的食材构成")].copy()
+
+    if big_df.empty:
+        print("[DEBUG] 整个CSV中，没有 relation=Ingredient 的记录。")
+        return ings, {}
+
+    # 添加一列小写
+    big_df["object_lower"] = big_df["object"].str.lower()
+
+    result_ings = []
+    map_dict = {}
+
+    for ing in ings:
+        # 先判断是否英文
+        if not is_english_word(ing):
+            print(f"[DEBUG] 食材 '{ing}' 被判定为中文或混合语言，跳过英文→中文的映射。")
+            result_ings.append(ing)
+            continue
+
+        ing_lower = ing.lower()
+        print(f"\n[DEBUG] 正在尝试将英文食材 '{ing}' (小写: '{ing_lower}') 映射为中文...")
+
+        # 在 big_df 中搜索
+        match_df = big_df[big_df["object_lower"] == ing_lower]
+
+        if match_df.empty:
+            print(f"[DEBUG] 未在 CSV 里找到任何 object_lower='{ing_lower}' 的行，映射失败。")
+            result_ings.append(ing)
+        else:
+            # 如果搜到多行，只取第一行（沿用原逻辑）
+            row = match_df.iloc[0]
+            row_above_idx = row["index"] - 1
+
+            print(f"[DEBUG] 找到英文行: index={row['index']}, object={row['object']}")
+            if row_above_idx < 0:
+                # 说明是 CSV 第一行，没法往上找
+                print("[DEBUG] 英文行在 CSV 第 0 行或之前，无法找到上一行中文食材。")
+                result_ings.append(ing)
+            else:
+                above_df = big_df[big_df["index"] == row_above_idx]
+                if above_df.empty:
+                    print(f"[DEBUG] 上一行 index={row_above_idx} 不存在或 relation != 食谱的食材构成，无法拿到中文。")
+                    result_ings.append(ing)
+                else:
+                    zh_ing = above_df["object"].values[0]
+                    print(f"[DEBUG] 已匹配到中文行: index={row_above_idx}, object={zh_ing}")
+                    result_ings.append(zh_ing)
+                    map_dict[ing] = zh_ing
+
+    return result_ings, map_dict
+
 
 def do_new_round(user_text: str, nutrition_kg: NutritionKG):
-    """
-    普通的新问题处理：根据提问提取10个关键词，再搜索匹配的食谱功效，并输出Top3。
-    保证回答与KG文件中的菜谱对齐。
-    """
     round_id = load_latest_round() + 1
 
-    # 1) Extract TCM keywords
     keywords = extract_keywords(user_text)
-
-    # 2) Searching by "食谱的功效"
     result_dfs = []
     for kw in keywords:
         sub_df = nutrition_kg.advanced_search(
@@ -398,45 +420,30 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     else:
         final_df = pd.DataFrame(columns=["subject", "relation", "object", "csv_idx"])
 
-    # 取出现频次最多的前50道菜，并从中选取前3
     top_50 = get_top50_subjects(final_df)
     top_3 = top_50[:3]
 
-    # 构建子图文本
-    subgraph_texts = []
-    # 清空旧KG文件
     clear_old_kg_files()
-
     is_eng = detect_language(user_text)
-    display_names = []  # 用于存储最终要给用户展示的菜名
+    display_names = []
+    subgraph_texts = []
 
-    # 保存三道菜到 KG 文件，并获取各自的 "display_name"
     for i, subj in enumerate(top_3, start=1):
-        # 取到英文或中文的对应行
-        full_df, disp_name = self_save_full_subject_csv(
-            nutrition_kg, subj, i, is_english=is_eng
-        )
+        full_df, disp_name = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
         display_names.append(disp_name)
 
-        # 用中文的 subject_str 来获取完整子图（因为CSV里中文subject才是主键）
-        # 但若你CSV本身就有英文subject是另一行，也可以改成 disp_name。
-        # 这里为了子图正确，我们仍使用 subj(中文行)做子图构建：
         subj_df = nutrition_kg.get_all_triples_for_subject(subj)
         g_sub = nutrition_kg.build_subgraph_from_df(subj_df)
-
-        edges = g_sub.edges(data=True)
         lines = []
-        for u, v, data in edges:
+        for u, v, data in g_sub.edges(data=True):
             r = data.get("relation", "")
             lines.append(f"{u} -[{r}]-> {v}")
         sub_text = f"【KG for {disp_name}】\n" + "\n".join(lines)
         subgraph_texts.append(sub_text)
 
-    # 生成回答
     chinese_ans = generate_final_explanation(user_text, keywords, display_names, subgraph_texts)
     final_ans = translate_to_english(chinese_ans) if is_eng else chinese_ans
 
-    # 写入历史
     append_history(round_id, "question", user_text)
     for kw in keywords:
         append_history(round_id, "keyword", kw)
@@ -446,8 +453,8 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
 
     print("\n===== Final Answer =====\n")
     print(final_ans)
+
     print("\n===== Final Answer-KG =====\n")
-    # 打印一下三道菜的合并df
     if len(top_3) > 0:
         frames = []
         for i in range(1, len(top_3)+1):
@@ -461,13 +468,10 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
             print("No KG files found.")
     else:
         print("No top 3 subject found.")
+
     return final_ans
 
-
 def do_chase_question(user_text: str):
-    """
-    基于上一轮回答进行深入追问。
-    """
     round_id = load_latest_round()
     if round_id < 1:
         print("No previous round to chase. Please start a new question.")
@@ -511,13 +515,7 @@ def do_chase_question(user_text: str):
     print(final_ans)
     return final_ans
 
-
 def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
-    """
-    基于上一轮推荐的备选菜谱列表，继续推荐新的3道食谱。
-    同时需要回溯更早轮次以获取关键词（若本轮无则往前查）。
-    最终也会清空旧KG并写入新的 top3，保持回答和CSV对齐。
-    """
     round_id = load_latest_round()
     if round_id < 1:
         print("No previous round. Please start a new question.")
@@ -534,7 +532,6 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
         print("Not enough recipes to recommend new ones. Need at least 6 from last round.")
         return
 
-    # 回溯查询关键功效关键词
     tmp_r = round_id
     kw_df = df[(df["round"] == tmp_r) & (df["type"] == "keyword")]
     while tmp_r > 0 and kw_df.empty:
@@ -546,33 +543,24 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     old_keywords = list(kw_df["content"].values)
 
     new_3 = last_50_list[3:6]
-
-    # 清空旧KG文件
     clear_old_kg_files()
-
     is_eng = detect_language(user_text)
     display_names = []
     subgraph_texts = []
 
-    # 构建子图文本 & 保存 CSV
     for i, subj in enumerate(new_3, start=1):
-        full_df, disp_name = self_save_full_subject_csv(
-            nutrition_kg, subj, i, is_english=is_eng
-        )
+        full_df, disp_name = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
         display_names.append(disp_name)
 
-        # 构建子图(注意: 这里为了匹配内部关系, 依旧使用中文版本subject subj)
         subj_df = nutrition_kg.get_all_triples_for_subject(subj)
         g_sub = nutrition_kg.build_subgraph_from_df(subj_df)
-        edges = g_sub.edges(data=True)
         lines = []
-        for u, v, data in edges:
+        for u, v, data in g_sub.edges(data=True):
             r = data.get("relation", "")
             lines.append(f"{u} -[{r}]-> {v}")
         sub_text = f"【KG for {disp_name}】\n" + "\n".join(lines)
         subgraph_texts.append(sub_text)
 
-    # 获取上一轮(或更早)用户问题
     q_df = df[(df["round"] == round_id) & (df["type"] == "question")]
     tmp_qr = round_id
     while tmp_qr > 0 and q_df.empty:
@@ -586,7 +574,6 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
 
     combined_question = f"{old_question_text}\n(用户补充需求: {user_text})"
     zh_ans = generate_final_explanation(combined_question, old_keywords, display_names, subgraph_texts)
-
     final_ans = translate_to_english(zh_ans) if is_eng else zh_ans
 
     new_round_id = round_id + 1
@@ -597,15 +584,7 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     print(final_ans)
     return final_ans
 
-
 def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
-    """
-    解析用户传入的JSON {"include": [...], "exclude": [...]}
-    - 回溯以获取上一轮或更早轮的10个功效关键词
-    - 搜索所有满足这些关键词的食谱
-    - 分步处理 include 和 exclude 并可视化每一步数量变化
-    - 最终取前3个推荐，清空旧KG文件并保存新的，同时在回答中保持菜名和CSV一致
-    """
     round_id = load_latest_round()
     if round_id < 1:
         print("No previous round. Please start a new question.")
@@ -619,9 +598,10 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         print("Invalid JSON format for include/exclude.")
         return
 
-    df_hist = pd.read_csv(HISTORY_CSV, encoding="utf-8-sig")
+    mapped_includes, map_in_dict = map_english_ingredients_to_chinese(include_ings, nutrition_kg.csv_path)
+    mapped_excludes, map_ex_dict = map_english_ingredients_to_chinese(exclude_ings, nutrition_kg.csv_path)
 
-    # 回溯获取关键词
+    df_hist = pd.read_csv(HISTORY_CSV, encoding="utf-8-sig")
     tmp_r = round_id
     kw_df = df_hist[(df_hist["round"] == tmp_r) & (df_hist["type"] == "keyword")]
     while tmp_r > 0 and kw_df.empty:
@@ -632,7 +612,6 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         return
     old_keywords = list(kw_df["content"].values)
 
-    # 1) 使用旧关键词搜索所有食谱
     result_dfs = []
     for kw in old_keywords:
         sub_df = nutrition_kg.advanced_search(
@@ -650,15 +629,17 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         return
 
     candidate_subjects = set(final_df["subject"].unique().tolist())
-
-    # 一次性查出所有 '食谱的食材构成'
     ing_df = nutrition_kg.advanced_search("食谱的食材构成", None, True)
 
     print("\n=== 分步处理 include 条件 ===")
-    for ing in include_ings:
+    for orig_ing, ing in zip(include_ings, mapped_includes):
         has_ing_set = set(ing_df[ing_df["object"] == ing]["subject"])
         candidate_subjects = candidate_subjects.intersection(has_ing_set)
-        print(f"包含食材 '{ing}' 后，剩余可选菜数量: {len(candidate_subjects)}")
+        if orig_ing != ing:
+            print(f"包含食材 '{orig_ing}' (映射为 '{ing}') 后，剩余可选菜数量: {len(candidate_subjects)}")
+        else:
+            print(f"包含食材 '{ing}' 后，剩余可选菜数量: {len(candidate_subjects)}")
+
         if not candidate_subjects:
             print("已经没有满足所有 include 条件的菜谱了。")
             break
@@ -668,10 +649,14 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         return
 
     print("\n=== 分步处理 exclude 条件 ===")
-    for ing in exclude_ings:
+    for orig_ing, ing in zip(exclude_ings, mapped_excludes):
         has_ing_set = set(ing_df[ing_df["object"] == ing]["subject"])
         new_candidates = candidate_subjects.difference(has_ing_set)
-        print(f"排除含食材 '{ing}' 后，剩余可选菜数量: {len(new_candidates)}")
+        if orig_ing != ing:
+            print(f"排除含食材 '{orig_ing}' (映射为 '{ing}') 后，剩余可选菜数量: {len(new_candidates)}")
+        else:
+            print(f"排除含食材 '{ing}' 后，剩余可选菜数量: {len(new_candidates)}")
+
         candidate_subjects = new_candidates
         if not candidate_subjects:
             print("已经没有满足 exclude 条件后的菜谱了。")
@@ -681,7 +666,6 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         print("\n=== 最终搜索结果为空 ===")
         return
 
-    # 排序并选前3
     sub_filtered_df = final_df[final_df["subject"].isin(candidate_subjects)]
     count_series = sub_filtered_df["subject"].value_counts()
     sorted_subjects = list(count_series.index)
@@ -690,17 +674,13 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         print("No recipes left after filtering.")
         return
 
-    # 清空旧KG文件
     clear_old_kg_files()
-
     is_eng = detect_language(user_text)
     display_names = []
     subgraph_texts = []
 
     for i, subj in enumerate(top_3, start=1):
-        full_df, disp_name = self_save_full_subject_csv(
-            nutrition_kg, subj, i, is_english=is_eng
-        )
+        full_df, disp_name = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
         display_names.append(disp_name)
 
         subj_df = nutrition_kg.get_all_triples_for_subject(subj)
@@ -714,8 +694,9 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         subgraph_texts.append(sub_text)
 
     explanation_text = (
-        f"用户要求包含食材: {include_ings}, 排除食材: {exclude_ings}。\n"
-        f"这是基于上一轮关键词 {old_keywords} 过滤后的结果：\n"
+        "用户要求包含食材: " + str(mapped_includes)
+        + ", 排除食材: " + str(mapped_excludes)
+        + f"。\n这是基于上一轮关键词 {old_keywords} 过滤后的结果：\n"
     )
     zh_ans = generate_final_explanation(explanation_text, old_keywords, display_names, subgraph_texts)
     final_ans = translate_to_english(zh_ans) if is_eng else zh_ans
@@ -727,7 +708,6 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
     print("\n===== Include/Exclude Filtered Recipes =====\n")
     print(final_ans)
     print("\n===== Final Answer-KG =====\n")
-    # 打印一下结果CSV
     frames = []
     for i in range(1, len(top_3)+1):
         fname = f"KG{i}.csv"
@@ -740,7 +720,6 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         print("No KG files found.")
 
     return final_ans
-
 
 def main():
     print("=== Multi-turn interactive system ===")
@@ -755,7 +734,6 @@ def main():
             print("Shutting down.")
             break
 
-        # 若能成功以 JSON 形式解析到 include / exclude，则走 do_include_exclude 分支
         is_json_input = False
         try:
             test_data = json.loads(user_text)
