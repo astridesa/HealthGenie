@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import ChatIcon from "@mui/icons-material/Chat";
 import Avatar from "@mui/material/Avatar";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Radio,
   RadioGroup,
@@ -11,7 +12,21 @@ import {
 import CancelIcon from "@mui/icons-material/Cancel";
 import Image from "next/image";
 
-const ChatBox = ({
+interface ChatBoxProps {
+  chat: {
+    id: string;
+    from: string;
+    content: string;
+  };
+  autoCompleteResponse: string;
+  setAutoCompleteResponse: (value: string) => void;
+  setUserInput: (value: string) => void;
+  slideValue: number;
+  showRelatedNode: boolean;
+  cancel: () => void;
+}
+
+const ChatBox: React.FC<ChatBoxProps> = ({
   chat,
   autoCompleteResponse,
   setAutoCompleteResponse,
@@ -19,14 +34,22 @@ const ChatBox = ({
   slideValue,
   showRelatedNode,
   cancel,
-}: any) => {
-  const handleSelection = (event: any) => {
+}) => {
+  const handleSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
     setAutoCompleteResponse(event.target.value as "accept" | "reject");
     if ((event.target.value as "accept" | "reject") === "accept") {
       setUserInput(`I want to know about ${chat.content}`);
     } else {
       setUserInput("");
     }
+  };
+
+  const components = {
+    h1: (props: React.HTMLAttributes<HTMLHeadingElement>) => <h1 className="text-2xl font-bold my-2" {...props} />,
+    h2: (props: React.HTMLAttributes<HTMLHeadingElement>) => <h2 className="text-xl font-bold my-2" {...props} />,
+    h3: (props: React.HTMLAttributes<HTMLHeadingElement>) => <h3 className="text-lg font-bold my-2" {...props} />,
+    p: (props: React.HTMLAttributes<HTMLParagraphElement>) => <p className="my-2" {...props} />,
+    strong: (props: React.HTMLAttributes<HTMLElement>) => <strong className="font-bold" {...props} />,
   };
 
   if (chat.from === "auto-complete") {
@@ -41,7 +64,11 @@ const ChatBox = ({
           </Avatar>
         </div>
         <div className="flex flex-col">
-          <Markdown className="text-[#012027] bg-[rgba(248,248,247,0.5)] px-2 rounded-lg">
+          <Markdown 
+            className="text-[#012027] bg-[rgba(248,248,247,0.5)] px-2 rounded-lg"
+            remarkPlugins={[remarkGfm]}
+            components={components}
+          >
             {`Do you want to know about ${chat.content}?`}
           </Markdown>
           <div className="flex flex-row justify-center">
@@ -83,7 +110,11 @@ const ChatBox = ({
           </Avatar>
         </div>
         <div className="flex flex-col">
-          <Markdown className="text-[#012027] bg-[rgba(248,248,247,0.5)] px-2 rounded-lg">
+          <Markdown 
+            className="text-[#012027] bg-[rgba(248,248,247,0.5)] px-2 rounded-lg"
+            remarkPlugins={[remarkGfm]}
+            components={components}
+          >
             {chat.content}
           </Markdown>
         </div>
@@ -94,10 +125,12 @@ const ChatBox = ({
   return (
     <div className="flex flex-row justify-end my-4 p-[10px] rounded-lg">
       <div className="flex flex-col text-[#012027] bg-[rgba(232,229,216,0.5)] py-2 rounded-lg">
-        {chat.content.split("\n").map((paragraph: any, index: any) => (
+        {chat.content.split("\n").map((paragraph: string, index: number) => (
           <Markdown
             key={`${chat.id}-paragraph${index}`}
             className="text-[#012027] p-2"
+            remarkPlugins={[remarkGfm]}
+            components={components}
           >
             {paragraph}
           </Markdown>
