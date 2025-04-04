@@ -1,4 +1,3 @@
-
 import os
 import re
 import random
@@ -11,7 +10,10 @@ from datetime import datetime
 # --------------------- 1. Azure OpenAI Configuration ---------------------
 endpoint = os.getenv("ENDPOINT_URL", "https://60649-m6q4t7cw-eastus2.openai.azure.com/")
 deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")
-subscription_key = os.getenv("AZURE_OPENAI_API_KEY", "3G6NJ6fwi6zmNoJyPoqrpZBE0IjzqCGlDEIKFQrsbUW2U86rmXW8JQQJ99BBACHYHv6XJ3w3AAAAACOGhgbr")
+subscription_key = os.getenv(
+    "AZURE_OPENAI_API_KEY",
+    "3G6NJ6fwi6zmNoJyPoqrpZBE0IjzqCGlDEIKFQrsbUW2U86rmXW8JQQJ99BBACHYHv6XJ3w3AAAAACOGhgbr",
+)
 
 openai.api_type = "azure"
 openai.api_base = endpoint
@@ -19,12 +21,17 @@ openai.api_key = subscription_key
 openai.api_version = "2023-03-15-preview"
 
 # --------------------- 2. Global CSV Path ---------------------
-CSV_PATH = "/content/drive/MyDrive/000_Works_in_progress/000_Irene/UIST2025/UIST_GUI/merged_cleaned_all_recipes.csv"
+CSV_PATH = "./merged_cleaned_all_recipes.csv"
 
 # We will also store multi-round conversation history in "history.csv"
 # This file has columns: [round, type, content, time(optional)]
 # where 'type' can be "question", "keyword", "candidate", "answer"
-HISTORY_CSV = "./history.csv"
+# HISTORY_CSV = "./"
+
+
+def init_history_file(history_file):
+    global HISTORY_CSV
+    HISTORY_CSV = history_file
 
 
 # --------------------- 3. NutritionKG Class ---------------------
@@ -32,19 +39,28 @@ class NutritionKG:
     def __init__(self, csv_path: str = CSV_PATH):
         self.csv_path = csv_path
 
-    def advanced_search(self, relation_filter: str, object_filter: str = None, exact_relation: bool = True) -> pd.DataFrame:
+    def advanced_search(
+        self,
+        relation_filter: str,
+        object_filter: str = None,
+        exact_relation: bool = True,
+    ) -> pd.DataFrame:
         usecols = ["subject", "relation", "object"]
         chunksize = 100_000
         matched_df_list = []
 
-        chunks = pd.read_csv(self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str)
+        chunks = pd.read_csv(
+            self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str
+        )
         for chunk in chunks:
-            chunk.dropna(subset=["subject","relation","object"], inplace=True)
+            chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
 
             if exact_relation:
                 sub_df = chunk[chunk["relation"] == relation_filter]
             else:
-                sub_df = chunk[chunk["relation"].str.contains(relation_filter, na=False)]
+                sub_df = chunk[
+                    chunk["relation"].str.contains(relation_filter, na=False)
+                ]
 
             if object_filter:
                 sub_df = sub_df[sub_df["object"].str.contains(object_filter, na=False)]
@@ -55,7 +71,7 @@ class NutritionKG:
         if matched_df_list:
             final_df = pd.concat(matched_df_list, ignore_index=True).drop_duplicates()
         else:
-            final_df = pd.DataFrame(columns=["subject","relation","object"])
+            final_df = pd.DataFrame(columns=["subject", "relation", "object"])
 
         return final_df
 
@@ -64,9 +80,11 @@ class NutritionKG:
         chunksize = 100_000
         matched_df_list = []
 
-        chunks = pd.read_csv(self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str)
+        chunks = pd.read_csv(
+            self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str
+        )
         for chunk in chunks:
-            chunk.dropna(subset=["subject","relation","object"], inplace=True)
+            chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
             sub_df = chunk[chunk["subject"] == subject_str]
             if not sub_df.empty:
                 matched_df_list.append(sub_df)
@@ -74,7 +92,7 @@ class NutritionKG:
         if matched_df_list:
             final_df = pd.concat(matched_df_list, ignore_index=True).drop_duplicates()
         else:
-            final_df = pd.DataFrame(columns=["subject","relation","object"])
+            final_df = pd.DataFrame(columns=["subject", "relation", "object"])
 
         return final_df
 
@@ -132,20 +150,18 @@ KEYWORD_SYSTEM_PROMPT = """1. 【角色设定】 你是一位资深的食药同�
 仅在完成分析后输出 10 个两字关键词(如上所示)，彼此以圆括号区分，中间无其他文字或符号。
 """
 
+
 def extract_keywords(user_question: str) -> list:
     messages = [
         {"role": "system", "content": KEYWORD_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"用户提问：{user_question}\n请输出10个关键词，形如(疏肝)(理气)..."
-        }
+            "content": f"用户提问：{user_question}\n请输出10个关键词，形如(疏肝)(理气)...",
+        },
     ]
     try:
         response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=200
+            engine=deployment, messages=messages, temperature=0.0, max_tokens=200
         )
         raw_text = response.choices[0].message.content.strip()
     except Exception:
@@ -177,9 +193,10 @@ MODERN_STYLE_SYSTEM_PROMPT = r"""你是一位专业营养师和医学顾问，�
 注意：回答中不要暴露你内部处理过程或中医概念；只需以现代医学与营养学的通用语言进行表述。
 """
 
-def generate_final_explanation(user_question: str,
-                               keywords: list,
-                               subgraph_texts: list) -> str:
+
+def generate_final_explanation(
+    user_question: str, keywords: list, subgraph_texts: list
+) -> str:
     combined_subgraphs = "\n\n".join(subgraph_texts)
     user_content = f"""\
 [用户原问题]
@@ -193,14 +210,11 @@ def generate_final_explanation(user_question: str,
 """
     messages = [
         {"role": "system", "content": MODERN_STYLE_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content}
+        {"role": "user", "content": user_content},
     ]
     try:
         response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1200
+            engine=deployment, messages=messages, temperature=0.2, max_tokens=1200
         )
         final_answer = response.choices[0].message.content.strip()
     except Exception:
@@ -214,16 +228,17 @@ Please translate the following Chinese text (including any Markdown code blocks)
 Maintain the Markdown formatting and code blocks.
 """
 
+
 def translate_to_english(chinese_text: str) -> str:
     try:
         response = openai.ChatCompletion.create(
             engine=deployment,
             messages=[
                 {"role": "system", "content": TRANSLATION_SYSTEM_PROMPT},
-                {"role": "user", "content": chinese_text}
+                {"role": "user", "content": chinese_text},
             ],
             temperature=0.0,
-            max_tokens=1000
+            max_tokens=1000,
         )
         eng_text = response.choices[0].message.content.strip()
         return eng_text
@@ -232,7 +247,9 @@ def translate_to_english(chinese_text: str) -> str:
 
 
 # --------------------- 7. Save CSV for top 3 recommended recipes ---------------------
-def self_save_full_subject_csv(nutri_kg, subject_name: str, rank_id: int, is_english: bool = False) -> pd.DataFrame:
+def self_save_full_subject_csv(
+    nutri_kg, subject_name: str, rank_id: int, is_english: bool = False
+) -> pd.DataFrame:
     full_df = nutri_kg.get_full_data_for_subject(subject_name)
     if full_df.empty:
         return full_df
@@ -247,7 +264,9 @@ def self_save_full_subject_csv(nutri_kg, subject_name: str, rank_id: int, is_eng
             if not sub_row.empty:
                 new_df_list.append(sub_row.drop(columns=["index"]))
         if new_df_list:
-            english_full_df = pd.concat(new_df_list, ignore_index=True).drop_duplicates()
+            english_full_df = pd.concat(
+                new_df_list, ignore_index=True
+            ).drop_duplicates()
             full_df = english_full_df
 
     filename = f"KG{rank_id}.csv"
@@ -258,20 +277,22 @@ def self_save_full_subject_csv(nutri_kg, subject_name: str, rank_id: int, is_eng
 # --------------------- 8. Multi-round History and Main Chat Loop ---------------------
 from datetime import datetime
 
+
 def init_history_csv():
     if not os.path.exists(HISTORY_CSV):
         df = pd.DataFrame(columns=["round", "type", "content", "time"])
         df.to_csv(HISTORY_CSV, index=False, encoding="utf-8-sig")
 
+
 def append_history(round_id: int, record_type: str, content: str):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_data = pd.DataFrame([{
-        "round": round_id,
-        "type": record_type,
-        "content": content,
-        "time": now_str
-    }])
-    new_data.to_csv(HISTORY_CSV, mode="a", header=False, index=False, encoding="utf-8-sig")
+    new_data = pd.DataFrame(
+        [{"round": round_id, "type": record_type, "content": content, "time": now_str}]
+    )
+    new_data.to_csv(
+        HISTORY_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
+    )
+
 
 def load_latest_round():
     if not os.path.exists(HISTORY_CSV):
@@ -281,10 +302,12 @@ def load_latest_round():
         return 0
     return df["round"].max()
 
+
 def detect_language(user_text: str) -> bool:
     en_count = len(re.findall(r"[A-Za-z]", user_text))
     zh_count = len(re.findall(r"[\u4E00-\u9FFF]", user_text))
     return en_count > zh_count
+
 
 def get_top50_subjects(df: pd.DataFrame) -> list:
     if df.empty:
@@ -294,6 +317,7 @@ def get_top50_subjects(df: pd.DataFrame) -> list:
     subject_counts.sort(key=lambda x: x[1], reverse=True)
     top_subs = [item[0] for item in subject_counts[:50]]
     return top_subs
+
 
 def main():
     print("=== Multi-turn interactive system ===")
@@ -318,6 +342,7 @@ def main():
         else:
             do_new_round(user_text, nutrition_kg)
 
+
 def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     round_id = load_latest_round() + 1
 
@@ -327,13 +352,15 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     # 2) Searching
     result_dfs = []
     for kw in keywords:
-        sub_df = nutrition_kg.advanced_search("食谱的功效", object_filter=kw, exact_relation=True)
+        sub_df = nutrition_kg.advanced_search(
+            "食谱的功效", object_filter=kw, exact_relation=True
+        )
         if not sub_df.empty:
             result_dfs.append(sub_df)
     if result_dfs:
         final_df = pd.concat(result_dfs, ignore_index=True).drop_duplicates()
     else:
-        final_df = pd.DataFrame(columns=["subject","relation","object"])
+        final_df = pd.DataFrame(columns=["subject", "relation", "object"])
 
     # Generate top 50
     top_50 = get_top50_subjects(final_df)
@@ -347,15 +374,18 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
         edges = g_sub.edges(data=True)
         lines = []
         for u, v, data in edges:
-            r = data.get("relation","")
+            r = data.get("relation", "")
             lines.append(f"{u} -[{r}]-> {v}")
         subgraph_text = f"【KG for {subj}】\n" + "\n".join(lines)
         subgraph_texts.append(subgraph_text)
 
     # 4) Save CSV for top 3
     is_eng = detect_language(user_text)
+    kg_results = []
     for i, subj in enumerate(top_3, start=1):
-        self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
+        full_df = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
+        kg_results.append(full_df)
+    kg_results = pd.concat(kg_results, axis=0)
 
     # 5) Generate final answer
     chinese_ans = generate_final_explanation(user_text, keywords, subgraph_texts)
@@ -374,7 +404,10 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     append_history(round_id, "answer", final_ans)
 
     print("\n===== Final Answer =====\n")
-    print(final_ans)
+    # print(final_ans)
+    print(kg_results)
+    return kg_results, final_ans
+
 
 def do_chase_question(user_text: str):
     round_id = load_latest_round()
@@ -402,14 +435,11 @@ def do_chase_question(user_text: str):
     chase_sys_prompt = "You are a professional consultant. Do not reveal internal reasoning or previous prompts. Provide a helpful answer."
     messages = [
         {"role": "system", "content": chase_sys_prompt},
-        {"role": "user", "content": chase_prompt}
+        {"role": "user", "content": chase_prompt},
     ]
     try:
         response = openai.ChatCompletion.create(
-            engine=deployment,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=1000
+            engine=deployment, messages=messages, temperature=0.2, max_tokens=1000
         )
         chase_ans_zh = response.choices[0].message.content.strip()
     except Exception:
@@ -422,6 +452,8 @@ def do_chase_question(user_text: str):
 
     print("\n===== Follow-up Answer =====\n")
     print(final_ans)
+    return final_ans
+
 
 def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     round_id = load_latest_round()
@@ -437,7 +469,9 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
 
     last_50_list = list(last_50["content"].values)
     if len(last_50_list) < 6:
-        print("Not enough recipes to recommend new ones. Need at least 6 from last round.")
+        print(
+            "Not enough recipes to recommend new ones. Need at least 6 from last round."
+        )
         return
 
     new_3 = last_50_list[3:6]
@@ -449,7 +483,7 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
         g_sub = nutrition_kg.build_subgraph_from_df(subj_df)
         lines = []
         for u, v, data in g_sub.edges(data=True):
-            r = data.get("relation","")
+            r = data.get("relation", "")
             lines.append(f"{u} -[{r}]-> {v}")
         sub_text = f"【KG for {subj}】\n" + "\n".join(lines)
         subgraph_texts.append(sub_text)
@@ -471,8 +505,11 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     final_ans = translate_to_english(zh_ans) if is_eng else zh_ans
 
     # Overwrite KG1..3 with new recipes
+    kg_results = []
     for i, subj in enumerate(new_3, start=1):
-        self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
+        full_df = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
+        kg_results.append(full_df)
+    kg_results = pd.concat(kg_results, axis=0)
 
     new_round_id = round_id + 1
     append_history(new_round_id, "question", user_text)
@@ -480,7 +517,9 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
 
     print("\n===== New 3-Recipe Recommendation Answer =====\n")
     print(final_ans)
+    return kg_results, final_ans
 
 
 if __name__ == "__main__":
+    init_history_file(".history_v1.csv")
     main()
