@@ -277,7 +277,7 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
         <div className="flex flex-wrap gap-1.5">
           {operations.length === 0 ? (
             <div className="w-full text-center text-gray-500 text-sm py-4">
-              Here is the operation record panel
+              Here is the interaction record panel
             </div>
           ) : (
             <AnimatePresence mode="popLayout">
