@@ -7,6 +7,7 @@ from flask_cors import CORS
 import csv
 import logging
 import traceback
+import re
 from pathlib import Path
 from main_new import (
     do_new_recommendation,
@@ -377,6 +378,9 @@ def answer_question():
         # print(final_answer)
         print("knowledgeGraph")
         print(knowledgeGraph)
+        if "```markdown" in final_answer:
+            final_answer = re.sub(r"```markdown", "", final_answer)
+            final_answer = re.sub(r"```", "", final_answer)
         return jsonify(
             {
                 "finalAnswer": final_answer,
