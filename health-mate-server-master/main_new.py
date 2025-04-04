@@ -23,16 +23,12 @@ openai.api_version = "2023-03-15-preview"
 # --------------------- 2. Global CSV Path ---------------------
 CSV_PATH = "./merged_cleaned_all_recipes.csv"
 
-# We will also store multi-round conversation history in "history.csv"
-# This file has columns: [round, type, content, time(optional)]
-# where 'type' can be "question", "keyword", "candidate", "answer"
+# 我们也会将多轮对话历史保存在 "history.csv" 中
 # HISTORY_CSV = "./"
-
 
 def init_history_file(history_file):
     global HISTORY_CSV
     HISTORY_CSV = history_file
-
 
 # --------------------- 3. NutritionKG Class ---------------------
 class NutritionKG:
@@ -45,54 +41,80 @@ class NutritionKG:
         object_filter: str = None,
         exact_relation: bool = True,
     ) -> pd.DataFrame:
+        """
+        在大 CSV 上分块搜索符合条件的 (subject, relation, object) 三元组，
+        额外保留其在原始 CSV 中的行号 csv_idx，用于后续英文行的检索。
+        """
         usecols = ["subject", "relation", "object"]
         chunksize = 100_000
         matched_df_list = []
 
+        offset = 0  # 用于记录分块读取时在CSV中的起始行
         chunks = pd.read_csv(
-            self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str
+            self.csv_path, chunksize=chunksize, dtype=str
         )
         for chunk in chunks:
-            chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
+            # 保留原始行号
+            chunk.reset_index(drop=False, inplace=True)  # index是本块内部的行号
+            chunk["csv_idx"] = chunk["index"] + offset  # csv_idx是全局行号
+            # 再做精简只保留所需列
+            sub_chunk = chunk[usecols + ["csv_idx"]].copy()
+
+            # 去掉 NaN 行
+            sub_chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
 
             if exact_relation:
-                sub_df = chunk[chunk["relation"] == relation_filter]
+                temp_df = sub_chunk[sub_chunk["relation"] == relation_filter]
             else:
-                sub_df = chunk[
-                    chunk["relation"].str.contains(relation_filter, na=False)
+                temp_df = sub_chunk[
+                    sub_chunk["relation"].str.contains(relation_filter, na=False)
                 ]
 
             if object_filter:
-                sub_df = sub_df[sub_df["object"].str.contains(object_filter, na=False)]
+                temp_df = temp_df[
+                    temp_df["object"].str.contains(object_filter, na=False)
+                ]
 
-            if not sub_df.empty:
-                matched_df_list.append(sub_df)
+            if not temp_df.empty:
+                matched_df_list.append(temp_df)
+
+            offset += len(chunk)  # 更新偏移量
 
         if matched_df_list:
             final_df = pd.concat(matched_df_list, ignore_index=True).drop_duplicates()
         else:
-            final_df = pd.DataFrame(columns=["subject", "relation", "object"])
+            final_df = pd.DataFrame(columns=["subject", "relation", "object", "csv_idx"])
 
         return final_df
 
     def get_all_triples_for_subject(self, subject_str: str) -> pd.DataFrame:
+        """
+        获取给定subject在CSV中出现的所有三元组，并保留csv_idx。
+        """
         usecols = ["subject", "relation", "object"]
         chunksize = 100_000
         matched_df_list = []
 
+        offset = 0
         chunks = pd.read_csv(
-            self.csv_path, chunksize=chunksize, usecols=usecols, dtype=str
+            self.csv_path, chunksize=chunksize, dtype=str
         )
         for chunk in chunks:
-            chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
-            sub_df = chunk[chunk["subject"] == subject_str]
-            if not sub_df.empty:
-                matched_df_list.append(sub_df)
+            chunk.reset_index(drop=False, inplace=True)
+            chunk["csv_idx"] = chunk["index"] + offset
+            sub_chunk = chunk[usecols + ["csv_idx"]].copy()
+
+            sub_chunk.dropna(subset=["subject", "relation", "object"], inplace=True)
+            temp_df = sub_chunk[sub_chunk["subject"] == subject_str]
+            if not temp_df.empty:
+                matched_df_list.append(temp_df)
+
+            offset += len(chunk)
 
         if matched_df_list:
             final_df = pd.concat(matched_df_list, ignore_index=True).drop_duplicates()
         else:
-            final_df = pd.DataFrame(columns=["subject", "relation", "object"])
+            final_df = pd.DataFrame(columns=["subject", "relation", "object", "csv_idx"])
 
         return final_df
 
@@ -108,20 +130,32 @@ class NutritionKG:
         return g_sub
 
     def get_full_data_for_subject(self, subject_str: str) -> pd.DataFrame:
+        """
+        返回CSV中所有 subject==subject_str 的完整记录(不仅 subject, relation, object)，
+        并保留 csv_idx 以便后续英文行查找。
+        """
         chunksize = 100_000
         matched_df_list = []
 
+        offset = 0
         chunks = pd.read_csv(self.csv_path, chunksize=chunksize, dtype=str)
         for chunk in chunks:
-            chunk.dropna(subset=["subject"], inplace=True)
-            sub_df = chunk[chunk["subject"] == subject_str]
-            if not sub_df.empty:
-                matched_df_list.append(sub_df)
+            # 先保留绝对行号
+            chunk.reset_index(drop=False, inplace=True)
+            chunk["csv_idx"] = chunk["index"] + offset
+
+            # 在本块中查找
+            temp_df = chunk[chunk["subject"] == subject_str].copy()
+            if not temp_df.empty:
+                matched_df_list.append(temp_df)
+
+            offset += len(chunk)
 
         if matched_df_list:
             final_df = pd.concat(matched_df_list, ignore_index=True).drop_duplicates()
         else:
             final_df = pd.DataFrame()
+
         return final_df
 
 
@@ -250,23 +284,30 @@ def translate_to_english(chinese_text: str) -> str:
 def self_save_full_subject_csv(
     nutri_kg, subject_name: str, rank_id: int, is_english: bool = False
 ) -> pd.DataFrame:
+    """
+    读取 subject_name 对应的所有行 (包括csv_idx)，如果是英文环境，
+    则用 csv_idx+1 去原始 CSV 查找英文对应行。
+    """
     full_df = nutri_kg.get_full_data_for_subject(subject_name)
     if full_df.empty:
         return full_df
 
+    # 如果要保存英文版本，则根据中文版本的 csv_idx+1 来找对应的英文行
     if is_english:
+        # 读入整个CSV以做行号匹配
         all_data = pd.read_csv(nutri_kg.csv_path, dtype=str)
-        all_data.reset_index(drop=False, inplace=True)
+        all_data.reset_index(drop=False, inplace=True)  # index是0~N
+        # 新的列表，将拼接出对应英文行
         new_df_list = []
-        for i in full_df.index:
-            english_row_idx = i + 1
+        for _, row in full_df.iterrows():
+            real_idx = row["csv_idx"]  # 中文行所在CSV位置
+            english_row_idx = real_idx + 1  # 英文应该在下一行
             sub_row = all_data[all_data["index"] == english_row_idx]
             if not sub_row.empty:
+                # 去掉 index 列即可
                 new_df_list.append(sub_row.drop(columns=["index"]))
         if new_df_list:
-            english_full_df = pd.concat(
-                new_df_list, ignore_index=True
-            ).drop_duplicates()
+            english_full_df = pd.concat(new_df_list, ignore_index=True).drop_duplicates()
             full_df = english_full_df
 
     filename = f"KG{rank_id}.csv"
@@ -275,9 +316,6 @@ def self_save_full_subject_csv(
 
 
 # --------------------- 8. Multi-round History and Main Chat Loop ---------------------
-from datetime import datetime
-
-
 def init_history_csv():
     if not os.path.exists(HISTORY_CSV):
         df = pd.DataFrame(columns=["round", "type", "content", "time"])
@@ -360,7 +398,7 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     if result_dfs:
         final_df = pd.concat(result_dfs, ignore_index=True).drop_duplicates()
     else:
-        final_df = pd.DataFrame(columns=["subject", "relation", "object"])
+        final_df = pd.DataFrame(columns=["subject", "relation", "object", "csv_idx"])
 
     # Generate top 50
     top_50 = get_top50_subjects(final_df)
@@ -385,17 +423,16 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     for i, subj in enumerate(top_3, start=1):
         full_df = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
         kg_results.append(full_df)
-    kg_results = pd.concat(kg_results, axis=0)
+    if kg_results:
+        kg_results = pd.concat(kg_results, axis=0)
+    else:
+        kg_results = pd.DataFrame()
 
     # 5) Generate final answer
     chinese_ans = generate_final_explanation(user_text, keywords, subgraph_texts)
     final_ans = translate_to_english(chinese_ans) if is_eng else chinese_ans
 
     # 6) Write to history
-    # - question
-    # - 10 keywords
-    # - up to 50 candidates
-    # - final answer
     append_history(round_id, "question", user_text)
     for kw in keywords:
         append_history(round_id, "keyword", kw)
@@ -404,7 +441,9 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     append_history(round_id, "answer", final_ans)
 
     print("\n===== Final Answer =====\n")
-    # print(final_ans)
+    print(final_ans)
+
+    print("\n===== Final Answer-KG =====\n")
     print(kg_results)
     return kg_results, final_ans
 
@@ -509,7 +548,10 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     for i, subj in enumerate(new_3, start=1):
         full_df = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
         kg_results.append(full_df)
-    kg_results = pd.concat(kg_results, axis=0)
+    if kg_results:
+        kg_results = pd.concat(kg_results, axis=0)
+    else:
+        kg_results = pd.DataFrame()
 
     new_round_id = round_id + 1
     append_history(new_round_id, "question", user_text)
