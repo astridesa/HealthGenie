@@ -354,7 +354,7 @@ def get_top50_subjects(df: pd.DataFrame) -> list:
     counts_series = df["subject"].value_counts()
     subject_counts = list(counts_series.items())
     subject_counts.sort(key=lambda x: x[1], reverse=True)
-    top_subs = [item[0] for item in subject_counts[:10]]
+    top_subs = [item[0] for item in subject_counts[:50]]
     return top_subs
 
 
@@ -458,6 +458,7 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
         final_df = pd.DataFrame(columns=["subject", "relation", "object", "csv_idx"])
 
     top_50 = get_top50_subjects(final_df)
+    random.shuffle(top_50)
     top_3 = top_50[:3]
 
     clear_old_kg_files()
@@ -491,11 +492,6 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
     for c in top_50:
         append_history(round_id, "candidate", c)
     append_history(round_id, "answer", final_ans)
-
-    print("\n===== Final Answer =====\n")
-    print(final_ans)
-
-    print("\n===== Final Answer-KG =====\n")
     if len(top_3) > 0:
         frames = []
         for i in range(1, len(top_3) + 1):
@@ -504,13 +500,12 @@ def do_new_round(user_text: str, nutrition_kg: NutritionKG):
                 frames.append(pd.read_csv(fname, dtype=str))
         if frames:
             merged_kg = pd.concat(frames, ignore_index=True)
-            print(merged_kg)
         else:
             print("No KG files found.")
     else:
-        print("No top 3 subject found.")
+        merged_kg = pd.DataFrame()
 
-    return final_ans
+    return merged_kg, final_ans
 
 
 def do_chase_question(user_text: str):
@@ -553,8 +548,6 @@ def do_chase_question(user_text: str):
     append_history(new_round_id, "question", user_text)
     append_history(new_round_id, "answer", final_ans)
 
-    print("\n===== Follow-up Answer =====\n")
-    print(final_ans)
     return final_ans
 
 
@@ -630,11 +623,10 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     append_history(new_round_id, "answer", final_ans)
 
     print("\n===== New 3-Recipe Recommendation Answer =====\n")
-    print(final_ans)
     return final_ans
 
 
-def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
+def do_include_exclude(user_text, nutrition_kg: NutritionKG):
     """
     在该函数里，我们根据包含/排除的食材是否有英文，来决定最终回答语言：
       - 若 JSON 中包含的食材里有任何英文，则最终回答输出【中文】；
@@ -646,7 +638,7 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         return
 
     try:
-        data = json.loads(user_text)
+        data = user_text
         include_ings = data.get("include", [])
         exclude_ings = data.get("exclude", [])
     except:
@@ -694,26 +686,26 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
     candidate_subjects = set(final_df["subject"].unique().tolist())
     ing_df = nutrition_kg.advanced_search("食谱的食材构成", None, True)
 
-    print("\n=== 分步处理 include 条件 ===")
+    # print("\n=== 分步处理 include 条件 ===")
     for orig_ing, ing in zip(include_ings, mapped_includes):
         has_ing_set = set(ing_df[ing_df["object"] == ing]["subject"])
         candidate_subjects = candidate_subjects.intersection(has_ing_set)
-        if orig_ing != ing:
-            print(
-                f"包含食材 '{orig_ing}' (映射为 '{ing}') 后，剩余可选菜数量: {len(candidate_subjects)}"
-            )
-        else:
-            print(f"包含食材 '{ing}' 后，剩余可选菜数量: {len(candidate_subjects)}")
+        # if orig_ing != ing:
+        #     print(
+        #         f"包含食材 '{orig_ing}' (映射为 '{ing}') 后，剩余可选菜数量: {len(candidate_subjects)}"
+        #     )
+        # else:
+        #     print(f"包含食材 '{ing}' 后，剩余可选菜数量: {len(candidate_subjects)}")
 
-        if not candidate_subjects:
-            print("已经没有满足所有 include 条件的菜谱了。")
-            break
+        # if not candidate_subjects:
+        #     print("已经没有满足所有 include 条件的菜谱了。")
+        #     break
 
     if not candidate_subjects:
         print("\n=== 最终搜索结果为空 ===")
         return
 
-    print("\n=== 分步处理 exclude 条件 ===")
+    # print("\n=== 分步处理 exclude 条件 ===")
     for orig_ing, ing in zip(exclude_ings, mapped_excludes):
         has_ing_set = set(ing_df[ing_df["object"] == ing]["subject"])
         new_candidates = candidate_subjects.difference(has_ing_set)
@@ -749,7 +741,7 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
     # 但回答时我们根据 any_english 来决定语种
     # is_eng_for_csv = detect_language(user_text)
     is_eng_for_csv = any_english
-    print(is_eng_for_csv)
+    # print(is_eng_for_csv)
 
     for i, subj in enumerate(top_3, start=1):
         full_df, disp_name = self_save_full_subject_csv(
@@ -789,9 +781,9 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
     append_history(new_round_id, "question", user_text)
     append_history(new_round_id, "answer", final_ans)
 
-    print("\n===== Include/Exclude Filtered Recipes =====\n")
-    print(final_ans)
-    print("\n===== Final Answer-KG =====\n")
+    # print("\n===== Include/Exclude Filtered Recipes =====\n")
+    # print(final_ans)
+    # print("\n===== Final Answer-KG =====\n")
     frames = []
     for i in range(1, len(top_3) + 1):
         fname = f"KG{i}.csv"
@@ -799,11 +791,11 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
             frames.append(pd.read_csv(fname, dtype=str))
     if frames:
         merged_kg = pd.concat(frames, ignore_index=True)
-        print(merged_kg)
+        # print(merged_kg)
     else:
-        print("No KG files found.")
+        merged_kg = pd.DataFrame()
 
-    return final_ans
+    return merged_kg, final_ans
 
 
 def main():

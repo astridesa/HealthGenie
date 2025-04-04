@@ -18,6 +18,8 @@ interface HistoryVisualizationProps {
   localUserId: string;
   setChats: React.Dispatch<React.SetStateAction<any[]>>;
   setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  setVisData: React.Dispatch<React.SetStateAction<any>>;
+  handleMentionNode: (nodes: any[], keywordNodes: any[]) => void;
 }
 
 const fetchHistory = async (userId: string) => {
@@ -69,7 +71,7 @@ const applyHistory = async (userId: string) => {
   return response.json();
 };
 
-const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId, setChats, setIsLoading }) => {
+const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId, setChats, setIsLoading, setVisData, handleMentionNode }) => {
   // Fetch history from server
   const { data: serverHistory } = useQuery({
     queryKey: ['history', localUserId],
@@ -145,7 +147,7 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
 
   const handleApply = async () => {
     try {
-      setIsLoading(true);  // Start loading
+      setIsLoading(true);
 
       // First call apply mutation
       await applyMutation.mutateAsync({
@@ -186,6 +188,76 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
           time: new Date().toISOString()
         }]);
 
+        // Handle knowledge graph data if available
+        if (data.knowledgeGraph) {
+          // Create unique IDs for nodes
+          const nodeMap = new Map<string, number>();
+          let nextId = 1;
+
+          // Helper function to get or create node ID
+          const getNodeId = (name: string) => {
+            if (!nodeMap.has(name)) {
+              nodeMap.set(name, nextId++);
+            }
+            return nodeMap.get(name)!;
+          };
+
+          // Create nodes from unique subjects and objects
+          const uniqueNodes = new Set([...data.knowledgeGraph.subject, ...data.knowledgeGraph.object]);
+          const nodes = Array.from(uniqueNodes).map(name => {
+            const id = getNodeId(name);
+            // Find the category from the backend data
+            let category = data.knowledgeGraph.cat?.[data.knowledgeGraph.object.indexOf(name)];
+            
+            // If category is not found, determine it based on the name
+            if (!category) {
+              if (name.includes('食谱的功效')) {
+                category = 'Health Benefit';
+              } else if (name.includes('食谱') || name.includes('菜谱')) {
+                category = 'menu';
+              } else {
+                category = 'menu'; // Default category
+              }
+            } else if (category === '食谱的功效') {
+              category = 'Health Benefit';
+            }
+            
+            return {
+              id,
+              name,
+              chinese: name,
+              category,
+              isShared: false,
+              // Add random initial positions to help with force layout
+              x: Math.random() * 500,
+              y: Math.random() * 500
+            };
+          });
+
+          // Create links from the triples
+          const links = data.knowledgeGraph.subject.map((subject: string, index: number) => {
+            const sourceId = getNodeId(subject);
+            const targetId = getNodeId(data.knowledgeGraph.object[index]);
+            return {
+              source: sourceId,
+              target: targetId,
+              relation: data.knowledgeGraph.relation[index],
+              isShared: false,
+              index
+            };
+          });
+
+          // Update visualization data
+          setVisData({ nodes: [], links: [] }); // Clear existing data
+          setTimeout(() => {
+            setVisData({ nodes, links });
+          }, 50);
+
+          // Update mentioned nodes for highlighting
+          const mentionedNodeIds = nodes.map(node => node.id);
+          handleMentionNode(nodes, mentionedNodeIds);
+        }
+
         // Clear visualization operations after successful API calls
         setLocalHistory(prevHistory => 
           prevHistory.filter(item => item.type === 'chat' || item.type === 'recommendation')
@@ -195,7 +267,7 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
     } catch (error) {
       console.error('Error in handleApply:', error);
     } finally {
-      setIsLoading(false);  // End loading regardless of success or failure
+      setIsLoading(false);
     }
   };
 

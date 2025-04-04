@@ -308,10 +308,10 @@ def recommend():
     sys_prompt = "You are an expert in predicting user health consultation intentions, specializing in recipe recommendation systems. Your task is to analyze the user's interaction history and predict their current need, then generate an approriate open question."
     query_recommend_prompt = """
     
-    ### Interaction History Forma
+    ### Interaction History Format
     1. The system helps users find recipes through a knowledge graph interface where users can include/exclude ingredients.
-    2. History records contain three fields:
-    - type: "include", "exclude", or "chat" (both user messages and assistant responses)
+    2. History records contain the following fields:
+    - type: "include", "exclude", "recommend" means the recommendation query, "apply" means the user apply the recommendation, "chat" (both user messages and assistant responses)
     - content: The main text of the interaction
     - time: Timestamp of the interaction
     3. Conversations between user and assistant messages.
@@ -370,9 +370,12 @@ def include_exclude():
     )
     init_history_file(kg_llm_retrive_path)
     operation = read_operation_history(user_id)
-    final_answer = do_include_exclude(operation, nutrition_kg)
-    print(final_answer)
-    return jsonify({"finalAnswer": final_answer})
+    kg_results, final_answer = do_include_exclude(operation, nutrition_kg)
+    if "```markdown" in final_answer:
+        final_answer = re.sub(r"```markdown", "", final_answer)
+        final_answer = re.sub(r"```", "", final_answer)
+    knowledgeGraph = pandas_to_json(kg_results) if not kg_results.empty else None
+    return jsonify({"finalAnswer": final_answer, "knowledgeGraph": knowledgeGraph})
 
 
 @app.route("/api/question", methods=["POST"])

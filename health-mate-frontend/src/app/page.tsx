@@ -287,6 +287,8 @@ const App = () => {
               localUserId={localUserId}
               setChats={setChats}
               setIsLoading={setIsLoading}
+              setVisData={setVisData}
+              handleMentionNode={handleMentionNode}
             />
           </div>
         </div>
