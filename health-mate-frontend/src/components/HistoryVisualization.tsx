@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { SERVER_URL } from '@/constant/server';
 import { ChatSession } from "../types/chat";
+import { v4 as uuidv4 } from 'uuid';
 
 interface HistoryItem {
   id: string;
@@ -15,6 +16,7 @@ interface HistoryVisualizationProps {
   localHistory: ChatSession[];
   setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   localUserId: string;
+  setChats: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 const fetchHistory = async (userId: string) => {
@@ -66,7 +68,7 @@ const applyHistory = async (userId: string) => {
   return response.json();
 };
 
-const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId }) => {
+const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId, setChats }) => {
   // Fetch history from server
   const { data: serverHistory } = useQuery({
     queryKey: ['history', localUserId],
@@ -111,13 +113,24 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
   });
 
   const applyMutation = useMutation({
-    mutationFn: () => applyHistory(localUserId),
+    mutationFn: async (history: ChatSession) => {
+      const response = await fetch(`${SERVER_URL}/api/history`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(history),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to apply history');
+      }
+      return response.json();
+    },
     onSuccess: () => {
-      // Only clear visualization operations (include/exclude), keep chat sessions
-      const chatSessions = localHistory.filter(item => 
+      // Update local history after successful mutation
+      setLocalHistory(prevHistory => prevHistory.filter(item => 
         item.type === 'chat' || item.type === 'recommendation'
-      );
-      setLocalHistory(chatSessions);
+      ));
     },
   });
 
@@ -129,14 +142,56 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
     }
   };
 
-  const handleApply = () => {
-    // Only clear visualization operations (include/exclude), keep chat sessions
-    const chatSessions = localHistory.filter(item => 
-      item.type === 'chat' || item.type === 'recommendation'
-    );
-    setLocalHistory(chatSessions);
-    // Then trigger the mutation
-    applyMutation.mutate();
+  const handleApply = async () => {
+    try {
+      // First call apply mutation
+      await applyMutation.mutateAsync({
+        id: localUserId,
+        content: "apply",
+        time: new Date().toISOString(),
+        type: "apply",
+        chats: []
+      });
+
+      // Then call include_exclude API
+      const response = await fetch(`${SERVER_URL}/api/include_exclude`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: localUserId,
+          operation: {
+            include: operations
+              .filter(op => op.type === 'include')
+              .map(op => op.content),
+            exclude: operations
+              .filter(op => op.type === 'exclude')
+              .map(op => op.content)
+          }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.finalAnswer) {
+        // Add the final answer to the chatbox
+        setChats(prevChats => [...prevChats, {
+          id: uuidv4(),
+          from: 'bot',
+          content: data.finalAnswer,
+          time: new Date().toISOString()
+        }]);
+
+        // Clear visualization operations after successful API calls
+        setLocalHistory(prevHistory => 
+          prevHistory.filter(item => item.type === 'chat' || item.type === 'recommendation')
+        );
+      }
+
+    } catch (error) {
+      console.error('Error in handleApply:', error);
+    }
   };
 
   return (

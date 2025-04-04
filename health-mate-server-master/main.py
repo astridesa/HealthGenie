@@ -353,12 +353,25 @@ def recommend():
     return jsonify({"recommendationQuery": response})
 
 
-@app.route("/api/operation", methods=["POST"])
-def get_operation():
+@app.route("/api/include_exclude", methods=["POST"])
+def include_exclude():
+    new_session_count = 0
     data = request.get_json()
     user_id = data.get("userId", "")
+    user_history = read_history_with_cancellations(user_id)
+    if user_history:
+        new_session_count = sum(
+            1
+            for h in user_history
+            if h["type"] == "chat" and h["content"] == "New chat session"
+        )
+    kg_llm_retrive_path = os.path.join(
+        HISTORY_DIR, user_id + "_task" + str(new_session_count) + ".csv"
+    )
+    init_history_file(kg_llm_retrive_path)
     operation = read_operation_history(user_id)
-    final_answer = do_include_exclude(operation)
+    final_answer = do_include_exclude(operation, nutrition_kg)
+    print(final_answer)
     return jsonify({"finalAnswer": final_answer})
 
 
@@ -431,8 +444,6 @@ def answer_question():
                 final_answer = do_chase_question(question)
                 knowledgeGraph = None
         # print(final_answer)
-        print("knowledgeGraph")
-        print(knowledgeGraph)
         if "```markdown" in final_answer:
             final_answer = re.sub(r"```markdown", "", final_answer)
             final_answer = re.sub(r"```", "", final_answer)
@@ -542,48 +553,6 @@ def pandas_to_json(data_frame):
     except Exception as e:
         logger.error(f"Error converting DataFrame to JSON: {str(e)}")
         return None
-
-
-def read_kg_files():
-    """Read KG1.csv, KG2.csv, KG3.csv and convert them into the required JSON format."""
-    try:
-        # Initialize lists to store data
-        subjects = []
-        relations = []
-        objects = []
-        cats = []
-
-        # List of KG files to read
-        kg_files = ["KG1.csv", "KG2.csv", "KG3.csv"]
-
-        for kg_file in kg_files:
-            try:
-                with open(kg_file, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        subjects.append(row["subject"])
-                        relations.append(row["relation"])
-                        objects.append(row["object"])
-                        cats.append(row["cat"])
-            except FileNotFoundError:
-                logger.warning(f"File {kg_file} not found, skipping...")
-                continue
-            except Exception as e:
-                logger.error(f"Error reading {kg_file}: {str(e)}")
-                continue
-
-        # Create the knowledge graph structure
-        knowledge_graph = {
-            "subject": subjects,
-            "relation": relations,
-            "object": objects,
-            "cat": cats,
-        }
-
-        return knowledge_graph
-    except Exception as e:
-        logger.error(f"Error in read_kg_files: {str(e)}")
-        return {"subject": [], "relation": [], "object": [], "cat": []}
 
 
 def read_chat_session_history(user_id: str) -> list:
@@ -706,7 +675,7 @@ def read_operation_history(user_id: str) -> list:
             return []
 
         # Skip header row
-        history_rows = rows[1:]
+        history_rows = rows[1:-1]
 
         # Process rows in reverse to find the most recent "New chat session"
         result = []
@@ -724,7 +693,7 @@ def read_operation_history(user_id: str) -> list:
         # Return in chronological order
         result_json = {}
         result_json["include"] = [
-            r["conent"] for r in reversed(result) if r["type"] == "include"
+            r["content"] for r in reversed(result) if r["type"] == "include"
         ]
         result_json["exclude"] = [
             r["content"] for r in reversed(result) if r["type"] == "exclude"

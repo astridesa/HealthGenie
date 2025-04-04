@@ -283,6 +283,7 @@ const App = () => {
               localHistory={localHistory} 
               setLocalHistory={setLocalHistory}
               localUserId={localUserId}
+              setChats={setChats}
             />
           </div>
         </div>
