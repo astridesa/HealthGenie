@@ -545,6 +545,8 @@ def pandas_to_json(data_frame):
         return None
     try:
         # Convert DataFrame to dictionary of lists
+        # remove the health benefit category, no to visualize in the knowledge graph
+        data_frame = data_frame[data_frame["cat"] != "Health Benefit"]
         return {
             "subject": (list(data_frame["subject"]) if "subject" in data_frame else []),
             "relation": (
