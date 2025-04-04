@@ -320,6 +320,10 @@ def load_latest_round():
     return df["round"].max()
 
 def detect_language(user_text: str) -> bool:
+    """
+    判断 user_text 中，英文字母 > 中文字符时，返回 True (表示英文为主)。
+    否则返回 False (表示中文为主)。
+    """
     en_count = len(re.findall(r"[A-Za-z]", user_text))
     zh_count = len(re.findall(r"[\u4E00-\u9FFF]", user_text))
     return en_count > zh_count
@@ -348,14 +352,16 @@ def map_english_ingredients_to_chinese(ings: list, csv_path: str) -> (list, dict
 
     big_df = pd.read_csv(csv_path, dtype=str)
     big_df.reset_index(drop=False, inplace=True)
-    # big_df = big_df[big_df["relation"] == "Ingredient"].copy()
 
+    # 这里可以根据自己的实际情况，决定只匹配 "Ingredient" 还是 "食谱的食材构成"
+    # 或者两者皆可
     big_df = big_df[
-    (big_df["relation"] == "Ingredient") | 
-    (big_df["relation"] == "食谱的食材构成")].copy()
+        (big_df["relation"] == "Ingredient") |
+        (big_df["relation"] == "食谱的食材构成")
+    ].copy()
 
     if big_df.empty:
-        print("[DEBUG] 整个CSV中，没有 relation=Ingredient 的记录。")
+        print("[DEBUG] 整个CSV中，没有 relation=Ingredient 或 relation=食谱的食材构成 的记录。")
         return ings, {}
 
     # 添加一列小写
@@ -393,7 +399,7 @@ def map_english_ingredients_to_chinese(ings: list, csv_path: str) -> (list, dict
             else:
                 above_df = big_df[big_df["index"] == row_above_idx]
                 if above_df.empty:
-                    print(f"[DEBUG] 上一行 index={row_above_idx} 不存在或 relation != 食谱的食材构成，无法拿到中文。")
+                    print(f"[DEBUG] 上一行 index={row_above_idx} 不存在或不符合条件，无法拿到中文。")
                     result_ings.append(ing)
                 else:
                     zh_ing = above_df["object"].values[0]
@@ -585,6 +591,11 @@ def do_new_recommendation(user_text: str, nutrition_kg: NutritionKG):
     return final_ans
 
 def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
+    """
+    在该函数里，我们根据包含/排除的食材是否有英文，来决定最终回答语言：
+      - 若 JSON 中包含的食材里有任何英文，则最终回答输出【中文】；
+      - 若 JSON 中所有的食材都是中文，则最终回答输出【英文】。
+    """
     round_id = load_latest_round()
     if round_id < 1:
         print("No previous round. Please start a new question.")
@@ -597,6 +608,10 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
     except:
         print("Invalid JSON format for include/exclude.")
         return
+
+    # 这里先判断：是否有任何英文食材
+    all_ings = include_ings + exclude_ings
+    any_english = any(is_english_word(ing) for ing in all_ings)
 
     mapped_includes, map_in_dict = map_english_ingredients_to_chinese(include_ings, nutrition_kg.csv_path)
     mapped_excludes, map_ex_dict = map_english_ingredients_to_chinese(exclude_ings, nutrition_kg.csv_path)
@@ -675,12 +690,17 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         return
 
     clear_old_kg_files()
-    is_eng = detect_language(user_text)
     display_names = []
     subgraph_texts = []
 
+    # 这里依然用 detect_language(user_text) 判断是否要拿英文行, 以保持和原代码一致
+    # 但回答时我们根据 any_english 来决定语种
+    # is_eng_for_csv = detect_language(user_text)
+    is_eng_for_csv = any_english
+    print(is_eng_for_csv)
+
     for i, subj in enumerate(top_3, start=1):
-        full_df, disp_name = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng)
+        full_df, disp_name = self_save_full_subject_csv(nutrition_kg, subj, i, is_english=is_eng_for_csv)
         display_names.append(disp_name)
 
         subj_df = nutrition_kg.get_all_triples_for_subject(subj)
@@ -698,8 +718,14 @@ def do_include_exclude(user_text: str, nutrition_kg: NutritionKG):
         + ", 排除食材: " + str(mapped_excludes)
         + f"。\n这是基于上一轮关键词 {old_keywords} 过滤后的结果：\n"
     )
+    # 先生成中文版本
     zh_ans = generate_final_explanation(explanation_text, old_keywords, display_names, subgraph_texts)
-    final_ans = translate_to_english(zh_ans) if is_eng else zh_ans
+
+    # 如果 json 中有英文, 则最终输出中文; 否则输出英文
+    if any_english:
+        final_ans = translate_to_english(zh_ans)
+    else:
+        final_ans = zh_ans
 
     new_round_id = round_id + 1
     append_history(new_round_id, "question", user_text)
@@ -744,9 +770,9 @@ def main():
 
         if is_json_input:
             do_include_exclude(user_text, nutrition_kg)
-        elif "chase" in user_text.lower():
+        elif "do_chase_question" in user_text.lower():
             do_chase_question(user_text)
-        elif "new" in user_text.lower():
+        elif "do_new_recommendation" in user_text.lower():
             do_new_recommendation(user_text, nutrition_kg)
         else:
             do_new_round(user_text, nutrition_kg)
