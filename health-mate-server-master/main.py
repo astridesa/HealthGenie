@@ -175,27 +175,32 @@ def read_history_with_cancellations(user_id: str) -> list:
 
         # Skip header row
         history_rows = rows[1:]
-
-        if not history_rows:
-            logger.info(f"No history records found for user {user_id}.")
-            return []
+        # print(history_rows)
+        # if not history_rows:
+        #     logger.info(f"No history records found for user {user_id}.")
+        #     return []
 
         # Process rows in reverse to handle consecutive cancellations
         result = []
         skip_count = 0
 
-        for row in reversed(history_rows):
-            if row[0] == "cancel":
-                # Increment skip count for each cancel record
-                skip_count += 1
-                continue
-            elif row[0] in ["include", "exclude"]:
-                if skip_count > 0:
-                    # Skip this record if we have pending cancellations
-                    skip_count -= 1
-                    continue
-                # Format the row as a history item object
+        for row in history_rows:
+            # print("row")
+            # print(row)
+            # if row[0] == "cancel":
+            #     # Increment skip count for each cancel record
+            #     skip_count += 1
+            #     continue
+            # elif row[0] in ["include", "exclude"]:
+            #     if skip_count > 0:
+            #         # Skip this record if we have pending cancellations
+            #         skip_count -= 1
+            #         continue
+            # Format the row as a history item object
+            if len(row) == 3:
                 result.append({"type": row[0], "content": row[1], "time": row[2]})
+            # else:
+            #     result.append({"type": row[0], "content": row[1]})
 
         # Reverse the result to get chronological order
         return result
@@ -310,7 +315,6 @@ def answer_question():
         question = data.get("question", "")
         user_id = data.get("userId", "")  # Get userId from request
         user_history = read_history_with_cancellations(user_id)
-        print(user_history)
         if not question:
             logger.error("Empty question received")
             return jsonify({"error": "Question is required"}), 400
@@ -359,13 +363,16 @@ def answer_question():
             )
         if not is_first_chat:
             recommend_or_answer = clarify_query_intend(question)
+            print("recommend_or_answer")
+            print(recommend_or_answer)
+            print(kg_llm_retrive_path)
             if recommend_or_answer:
                 kg_reulsts, final_answer = do_new_recommendation(question, nutrition_kg)
                 knowledgeGraph = (
                     pandas_to_json(kg_reulsts) if not kg_reulsts.empty else None
                 )
             else:
-                final_answer = do_chase_question(question, nutrition_kg)
+                final_answer = do_chase_question(question)
                 knowledgeGraph = None
         # print(final_answer)
         print("knowledgeGraph")
@@ -395,12 +402,13 @@ def clarify_query_intend(question):
         response = openai.ChatCompletion.create(
             engine=deployment, messages=messages, temperature=0.2, max_tokens=10
         )
+
     except Exception:
         return False
     response = response.choices[0].message.content.strip()
-    if response == "yes" or "Yes":
+    if response == "yes" or response == "Yes":
         return True
-    elif response == "No" or "no":
+    else:
         return False
 
 
