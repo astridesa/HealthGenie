@@ -25,10 +25,10 @@ openai.api_version = "2023-03-15-preview"
 CSV_PATH = "./merged_cleaned_all_recipes.csv"
 
 
-def init_history_file(user_id="user123"):
+def init_history_file(user_id_file="user123.csv"):
     # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     global HISTORY_CSV
-    HISTORY_CSV = f".history_{user_id}.csv"
+    HISTORY_CSV = user_id_file
     if not os.path.exists(HISTORY_CSV):
         df = pd.DataFrame(columns=["round", "type", "content", "time"])
         df.to_csv(HISTORY_CSV, index=False, encoding="utf-8-sig")
