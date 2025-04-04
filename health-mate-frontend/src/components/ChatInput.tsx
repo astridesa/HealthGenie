@@ -16,6 +16,7 @@ const ChatInput = ({
   setAutoCompleteResponse,
   setRecommendQuery,
   recommendQuery,
+  userId,
 }: any) => {
   const chatBotInput = useRef(null);
 
@@ -30,6 +31,7 @@ const ChatInput = ({
       from: "user",
       content: userInput,
       id: uuidv4(),
+      userId: userId,
     };
     
     // Simply append the new chat message without filtering

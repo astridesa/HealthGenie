@@ -86,9 +86,9 @@ const sendRecommendationHistory = async (currentHistory: string, localUserId: st
   }
 };
 
-const sendQuestion = async ({ inputValue }: any) => {
+const sendQuestion = async ({ inputValue, userId }: any) => {
   try {
-    console.log("Sending question:", { inputValue }); // Debug log
+    console.log("Sending question:", { inputValue, userId }); // Debug log
     console.log("Server URL:", SERVER_URL); // Log the server URL being used
     
     const response = await fetch(`${SERVER_URL}/api/question`, {
@@ -100,6 +100,7 @@ const sendQuestion = async ({ inputValue }: any) => {
       credentials: "include",
       body: JSON.stringify({
         question: inputValue,
+        userId: userId,
       }),
     });
 
@@ -107,13 +108,39 @@ const sendQuestion = async ({ inputValue }: any) => {
     console.log("Response headers:", Object.fromEntries(response.headers.entries())); // Log response headers
 
     if (!response.ok) {
-      const errorData = await response.json();
+      let errorData;
+      let errorText;
+      
+      // Try to get the error response as text first
+      try {
+        const responseClone = response.clone();
+        errorText = await responseClone.text();
+        
+        // Try to parse the text as JSON
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (jsonError) {
+          // If JSON parsing fails, use the text as error message
+          errorData = { error: errorText || 'Unknown error occurred' };
+        }
+      } catch (textError: any) {
+        // If text reading fails, create a basic error object
+        errorData = { 
+          error: `Server error: ${response.status} ${response.statusText}`,
+          details: textError?.message || 'Failed to read error response'
+        };
+      }
+
+      // Log detailed error information
       console.error("Server error details:", {
         status: response.status,
         statusText: response.statusText,
         errorData,
-        responseText: await response.text() // Get raw response text as fallback
+        headers: Object.fromEntries(response.headers.entries()),
+        url: response.url
       });
+      
+      // Throw a more informative error
       throw new Error(errorData.error || `Server error: ${response.status} ${response.statusText}`);
     }
 
@@ -206,7 +233,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
   }, [chats]);
 
   const mutation = useMutation({
-    mutationFn: sendQuestion,
+    mutationFn: ({ inputValue }) => sendQuestion({ inputValue, userId: localUserId }),
     onSuccess: async (successData) => {
       const { finalAnswer, knowledgeGraph } = successData;
 
@@ -241,13 +268,26 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         const nodes = Array.from(uniqueNodes).map(name => {
           const id = getNodeId(name);
           // Find the category from the backend data
-          const category = knowledgeGraph.cat?.[knowledgeGraph.object.indexOf(name)] || 
-                          (name.includes('功效') ? 'effect' : 'menu');
+          let category = knowledgeGraph.cat?.[knowledgeGraph.object.indexOf(name)];
+          
+          // If category is not found, determine it based on the name
+          if (!category) {
+            if (name.includes('食谱的功效')) {
+              category = 'Health Benefit';
+            } else if (name.includes('食谱') || name.includes('菜谱')) {
+              category = 'menu';
+            } else {
+              category = 'menu'; // Default category
+            }
+          } else if (category === '食谱的功效') {
+            category = 'Health Benefit';
+          }
+          
           return {
             id,
             name,
             chinese: name,
-            category: category === '功效' ? 'effect' : category,  // Convert '功效' to 'effect'
+            category,
             isShared: false,
             // Add random initial positions to help with force layout
             x: Math.random() * 500,
@@ -416,13 +456,26 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
         const nodes = Array.from(uniqueNodes).map(name => {
           const id = getNodeId(name);
           // Find the category from the backend data
-          const category = data.knowledgeGraph.cat?.[data.knowledgeGraph.object.indexOf(name)] || 
-                          (name.includes('功效') ? 'effect' : 'menu');
+          let category = data.knowledgeGraph.cat?.[data.knowledgeGraph.object.indexOf(name)];
+          
+          // If category is not found, determine it based on the name
+          if (!category) {
+            if (name.includes('食谱的功效')) {
+              category = 'Health Benefit';
+            } else if (name.includes('食谱') || name.includes('菜谱')) {
+              category = 'menu';
+            } else {
+              category = 'menu'; // Default category
+            }
+          } else if (category === '食谱的功效') {
+            category = 'Health Benefit';
+          }
+          
           return {
             id,
             name,
             chinese: name,
-            category: category === '功效' ? 'effect' : category,  // Convert '功效' to 'effect'
+            category,
             isShared: false,
             // Add random initial positions to help with force layout
             x: Math.random() * 500,
@@ -565,8 +618,9 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
             setIsInputing={setIsInputing}
             autoCompleteResponse={autoCompleteResponse}
             setAutoCompleteResponse={setAutoCompleteResponse}
-            recommendQuery={recommendQuery}
             setRecommendQuery={setRecommendQuery}
+            recommendQuery={recommendQuery}
+            userId={localUserId}
           />
         </div>
       </div>

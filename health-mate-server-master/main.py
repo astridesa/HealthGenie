@@ -8,8 +8,16 @@ import csv
 import logging
 import traceback
 from pathlib import Path
+from main_new import (
+    do_new_recommendation,
+    do_new_round,
+    do_chase_question,
+    init_history_csv,
+    init_history_file,
+)
 
-from nutrition import NutritionKG
+
+from main_new import NutritionKG
 
 nutrition_kg = NutritionKG()
 
@@ -40,105 +48,43 @@ FINAL_ANSWER_SYSTEM_PROMPT = """You are a nutrition consultant. Please utilize t
 """
 
 
-def extract_keywords(
-    user_question: str, system_prompt: str = KEYWORD_SYSTEM_PROMPT
-) -> list:
-    chat_prompt = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": f"user question：{user_question}\n please output important keywords in English",
-        },
-    ]
-    try:
-        response = openai.ChatCompletion.create(
-            engine=deployment,  # Azure OpenAI 通常用 engine (或 deployment_name)
-            messages=chat_prompt,
-            max_tokens=200,
-            temperature=0.0,
-        )
-        raw_text = response["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(e)
-        return []
+# def generate_final_answer(
+#     user_question: str,
+#     triple_df: pd.DataFrame,
+#     system_prompt: str = FINAL_ANSWER_SYSTEM_PROMPT,
+# ) -> str:
+#     # 整理知識圖譜
+#     if triple_df.empty:
+#         knowledge_text = "查無相關的知識圖譜資訊。"
+#     else:
+#         triple_lines = [
+#             f"({row['subject']} - {row['relation']} - {row['object']})"
+#             for _, row in triple_df.iterrows()
+#         ]
+#         knowledge_text = "\n".join(triple_lines)
 
-    # 將「、」「；」「;」等替換成逗號，再用正則分割
-    replaced_text = re.sub(r"[、；;]", ",", raw_text)
-    tokens = re.split(r"[,\s\n]+", replaced_text)
-    keywords = [t.strip() for t in tokens if t.strip()]
+#     chat_prompt = [
+#         {"role": "system", "content": system_prompt},
+#         {
+#             "role": "user",
+#             "content": f"""用户提出的食谱相关的问题是：{user_question}
 
-    return keywords
+#                         从我们自己构建的养生食谱数据库中为搜索到了以下以三元组形式存储的数据内容：
+#                         {knowledge_text}
 
+#                         请你基于上面的搜索得到的食谱条目进行回答；若搜索得到的内容不足以支撑对应的回答，请你基于自己的知识，推断用户提问的意图，并作出言之有理的恰当回答。
+#                         """,
+#         },
+#     ]
 
-def search_in_kg(kg: NutritionKG, keywords: list) -> dict:
-    matched_df_list = []
-    for kw in keywords:
-        df_sub = kg.search_by_subject(kw, exact=False)
-        df_obj = kg.search_by_object(kw, exact=False)
-        df_rel = kg.search_by_relation(kw, exact=False)
-
-        if not df_sub.empty:
-            matched_df_list.append(df_sub)
-        if not df_obj.empty:
-            matched_df_list.append(df_obj)
-        if not df_rel.empty:
-            matched_df_list.append(df_rel)
-
-    if matched_df_list:
-        final_df = pd.concat(matched_df_list).drop_duplicates().reset_index(drop=True)
-    else:
-        final_df = pd.DataFrame(columns=["subject", "relation", "object"])
-
-    g_sub = kg.get_subgraph_from_df(final_df)
-    node_list = list(g_sub.nodes())
-    edge_list = [
-        (u, v, data.get("relation")) for (u, v, data) in g_sub.edges(data=True)
-    ]
-
-    # Create response with node IDs and names
-    nodes = [{"id": node, "name": g_sub.nodes[node]["name"]} for node in node_list]
-    edges = [(u, v, rel) for (u, v, rel) in edge_list]
-
-    return {"nodes": nodes, "edges": edges, "matches_df": final_df}
-
-
-def generate_final_answer(
-    user_question: str,
-    triple_df: pd.DataFrame,
-    system_prompt: str = FINAL_ANSWER_SYSTEM_PROMPT,
-) -> str:
-    # 整理知識圖譜
-    if triple_df.empty:
-        knowledge_text = "查無相關的知識圖譜資訊。"
-    else:
-        triple_lines = [
-            f"({row['subject']} - {row['relation']} - {row['object']})"
-            for _, row in triple_df.iterrows()
-        ]
-        knowledge_text = "\n".join(triple_lines)
-
-    chat_prompt = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": f"""用户提出的食谱相关的问题是：{user_question}
-
-                        从我们自己构建的养生食谱数据库中为搜索到了以下以三元组形式存储的数据内容：
-                        {knowledge_text}
-
-                        请你基于上面的搜索得到的食谱条目进行回答；若搜索得到的内容不足以支撑对应的回答，请你基于自己的知识，推断用户提问的意图，并作出言之有理的恰当回答。
-                        """,
-        },
-    ]
-
-    try:
-        response = openai.ChatCompletion.create(
-            engine=deployment, messages=chat_prompt, max_tokens=600, temperature=0.2
-        )
-        final_answer = response["choices"][0]["message"]["content"].strip()
-        return final_answer
-    except Exception as e:
-        return f"在生成回答时遇到错误：{str(e)}"
+#     try:
+#         response = openai.ChatCompletion.create(
+#             engine=deployment, messages=chat_prompt, max_tokens=600, temperature=0.2
+#         )
+#         final_answer = response["choices"][0]["message"]["content"].strip()
+#         return final_answer
+#     except Exception as e:
+#         return f"在生成回答时遇到错误：{str(e)}"
 
 
 app = Flask(__name__)
@@ -224,10 +170,15 @@ def read_history_with_cancellations(user_id: str) -> list:
             rows = list(reader)
 
         if not rows:
+            logger.info(f"History file for user {user_id} is empty.")
             return []
 
         # Skip header row
         history_rows = rows[1:]
+
+        if not history_rows:
+            logger.info(f"No history records found for user {user_id}.")
+            return []
 
         # Process rows in reverse to handle consecutive cancellations
         result = []
@@ -247,7 +198,7 @@ def read_history_with_cancellations(user_id: str) -> list:
                 result.append({"type": row[0], "content": row[1], "time": row[2]})
 
         # Reverse the result to get chronological order
-        return list(reversed(result))
+        return result
     except Exception as e:
         logger.error(f"Error reading history file: {str(e)}")
         return []
@@ -357,145 +308,74 @@ def answer_question():
             return jsonify({"error": "No JSON data received"}), 400
 
         question = data.get("question", "")
+        user_id = data.get("userId", "")  # Get userId from request
+        user_history = read_history_with_cancellations(user_id)
+        print(user_history)
         if not question:
             logger.error("Empty question received")
             return jsonify({"error": "Question is required"}), 400
 
-        logger.info(f"Processing question: {question}")
+        logger.info(f"Processing question from user {user_id}: {question}")
 
-        # Extract keywords from the question
-        try:
-            keywords = extract_keywords(question)
-            logger.info(f"Extracted keywords: {keywords}")
-        except Exception as e:
-            logger.error(f"Error extracting keywords: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({"error": f"Failed to extract keywords: {str(e)}"}), 500
-
-        # Search in knowledge graph
-        try:
-            search_result = search_in_kg(nutrition_kg, keywords)
-            logger.info(f"Search result: {search_result}")
-        except Exception as e:
-            logger.error(f"Error searching knowledge graph: {str(e)}")
-            logger.error(traceback.format_exc())
-            return (
-                jsonify({"error": f"Failed to search knowledge graph: {str(e)}"}),
-                500,
+        # Calculate the number of new chat sessions
+        new_session_count = 0
+        if user_history:
+            new_session_count = sum(
+                1
+                for h in user_history
+                if h["type"] == "chat" and h["content"] == "New chat session"
             )
-
-        # Generate final answer
-        try:
-            final_answer = generate_final_answer(question, search_result["matches_df"])
-            logger.info(f"Generated answer: {final_answer}")
-        except Exception as e:
-            logger.error(f"Error generating final answer: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({"error": f"Failed to generate answer: {str(e)}"}), 500
-
-        # Convert DataFrame to list of dictionaries for JSON serialization
-        matches_df = search_result["matches_df"]
-        if not matches_df.empty:
-            matches_data = matches_df.to_dict("records")
+        kg_llm_retrive_path = os.path.join(
+            HISTORY_DIR, user_id + "_task" + str(new_session_count) + ".csv"
+        )
+        # Check if this is the first chat message
+        is_first_chat = False
+        if not user_history:
+            # If no history exists, this is the first chat
+            is_first_chat = True
         else:
-            matches_data = []
-
-        # return jsonify(
-        #     {
-        #         "finalAnswer": final_answer,
-        #         "searchResult": {
-        #             "nodes": search_result["nodes"],
-        #             "edges": search_result["edges"],
-        #             "matches": matches_data,
-        #         },
-        #         "keywords": keywords,
-        #     }
-        # )
+            # Check if this is the first chat type message
+            chat_messages = [h for h in user_history if h["type"] == "chat"]
+            if not chat_messages:
+                is_first_chat = True
+            else:
+                # Check if this is the first chat after a "New chat session" message
+                for i in range(len(user_history) - 1, -1, -1):
+                    if (
+                        user_history[i]["type"] == "chat"
+                        and user_history[i]["content"] == "New chat session"
+                    ):
+                        is_first_chat = True
+                        break
+                    elif user_history[i]["type"] == "chat":
+                        break
+        init_history_file(kg_llm_retrive_path)
+        if is_first_chat:
+            # print(is_first_chat)
+            init_history_csv()
+            kg_reulsts, final_answer = do_new_round(question, nutrition_kg)
+            knowledgeGraph = (
+                pandas_to_json(kg_reulsts) if not kg_reulsts.empty else None
+            )
+        if not is_first_chat:
+            recommend_or_answer = clarify_query_intend(question)
+            if recommend_or_answer:
+                kg_reulsts, final_answer = do_new_recommendation(question, nutrition_kg)
+                knowledgeGraph = (
+                    pandas_to_json(kg_reulsts) if not kg_reulsts.empty else None
+                )
+            else:
+                final_answer = do_chase_question(question, nutrition_kg)
+                knowledgeGraph = None
+        # print(final_answer)
+        print("knowledgeGraph")
+        print(knowledgeGraph)
         return jsonify(
             {
                 "finalAnswer": final_answer,
-                "knowledgeGraph": {
-                    "subject": [
-                        "枸杞大枣粥",
-                        "枸杞大枣粥",
-                        "枸杞大枣粥",
-                        "枸杞大枣粥",
-                        "枸杞大枣粥",
-                        "枸杞大枣粥",
-                        "莲子百合小米粥",
-                        "莲子百合小米粥",
-                        "莲子百合小米粥",
-                        "莲子百合小米粥",
-                        "莲子百合小米粥",
-                        "莲子百合小米粥",
-                        "百合银耳羹",
-                        "百合银耳羹",
-                        "百合银耳羹",
-                        "百合银耳羹",
-                        "百合银耳羹",
-                        "百合银耳羹",
-                    ],
-                    "relation": [
-                        "功效",
-                        "功效",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                        "功效",
-                        "功效",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                        "功效",
-                        "功效",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                        "食物构成",
-                    ],
-                    "object": [
-                        "补血益气",
-                        "宁心安神",
-                        "大米",
-                        "枸杞",
-                        "红枣",
-                        "清水",
-                        "清心除烦",
-                        "养血安神",
-                        "小米",
-                        "干莲子",
-                        "干百合",
-                        "清水",
-                        "润肺除躁热",
-                        "安神助眠",
-                        "干百合",
-                        "干银耳",
-                        "冰糖",
-                        "清水",
-                    ],
-                    "cat": [
-                        "功效",
-                        "功效",
-                        "A1",
-                        "A3",
-                        "A3",
-                        "D",
-                        "功效",
-                        "功效",
-                        "A1",
-                        "A3",
-                        "A3",
-                        "D",
-                        "功效",
-                        "功效",
-                        "A2",
-                        "A2",
-                        "D",
-                        "D",
-                    ],
-                },
+                "knowledgeGraph": knowledgeGraph,
+                "isFirstChat": is_first_chat,
+                "newSessionCount": new_session_count,
             }
         )
 
@@ -503,6 +383,25 @@ def answer_question():
         logger.error(f"Unexpected error in answer_question: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
+def clarify_query_intend(question):
+    clarify_system_prompt = "You are a query intention prediction expert, your task is to justify whether user'query intention is to obtain a new recipe or obtain answers. If the intention is to obtain recipe, output 'yes'; if the intention is to obtain answers, output 'no', the ouput only can be 'yes' or 'no', no other words."
+    messages = [
+        {"role": "system", "content": clarify_system_prompt},
+        {"role": "system", "content": question},
+    ]
+    try:
+        response = openai.ChatCompletion.create(
+            engine=deployment, messages=messages, temperature=0.2, max_tokens=10
+        )
+    except Exception:
+        return False
+    response = response.choices[0].message.content.strip()
+    if response == "yes" or "Yes":
+        return True
+    elif response == "No" or "no":
+        return False
 
 
 def test_azure_connection():
@@ -531,6 +430,66 @@ def test_azure_connection():
         logger.error(f"Error type: {type(e)}")
         logger.error(f"Error traceback: {traceback.format_exc()}")
         return False
+
+
+def pandas_to_json(data_frame):
+    if data_frame is None or data_frame.empty:
+        return None
+    try:
+        # Convert DataFrame to dictionary of lists
+        return {
+            "subject": (list(data_frame["subject"]) if "subject" in data_frame else []),
+            "relation": (
+                list(data_frame["relation"]) if "relation" in data_frame else []
+            ),
+            "object": (list(data_frame["object"]) if "object" in data_frame else []),
+            "cat": list(data_frame["cat"]) if "cat" in data_frame else [],
+        }
+    except Exception as e:
+        logger.error(f"Error converting DataFrame to JSON: {str(e)}")
+        return None
+
+
+def read_kg_files():
+    """Read KG1.csv, KG2.csv, KG3.csv and convert them into the required JSON format."""
+    try:
+        # Initialize lists to store data
+        subjects = []
+        relations = []
+        objects = []
+        cats = []
+
+        # List of KG files to read
+        kg_files = ["KG1.csv", "KG2.csv", "KG3.csv"]
+
+        for kg_file in kg_files:
+            try:
+                with open(kg_file, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        subjects.append(row["subject"])
+                        relations.append(row["relation"])
+                        objects.append(row["object"])
+                        cats.append(row["cat"])
+            except FileNotFoundError:
+                logger.warning(f"File {kg_file} not found, skipping...")
+                continue
+            except Exception as e:
+                logger.error(f"Error reading {kg_file}: {str(e)}")
+                continue
+
+        # Create the knowledge graph structure
+        knowledge_graph = {
+            "subject": subjects,
+            "relation": relations,
+            "object": objects,
+            "cat": cats,
+        }
+
+        return knowledge_graph
+    except Exception as e:
+        logger.error(f"Error in read_kg_files: {str(e)}")
+        return {"subject": [], "relation": [], "object": [], "cat": []}
 
 
 # Test connection when server starts

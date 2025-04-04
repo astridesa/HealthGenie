@@ -613,11 +613,11 @@ const Visualization: React.FC<VisualizationProps> = (props) => {
           top: `20px`,
         }}
       >
-        {colors.map((color: any) => {
+        {colors.map((color: any, index: number) => {
           return (
             <div
               className="flex flex-row items-center justify-start w-full my-0.5"
-              key={color.color}
+              key={`${color.category}-${index}`}
             >
               <div
                 className='w-3 h-3 rounded-md mr-2'

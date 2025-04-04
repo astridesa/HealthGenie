@@ -40,10 +40,10 @@ export const colors = [
     content: "Condiments"
   },
   {
-    category: "effect",
+    category: "Health Benefit",
     color: "rgb(246,216,214)",
-    content: "Effects"
-  }
+    content: "Health Benefit"
+  },
 ];
 
 export const getCategoryColor = (type: string) => {
