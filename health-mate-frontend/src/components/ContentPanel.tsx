@@ -598,6 +598,18 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
     }
   };
 
+  // Add effect to scroll to bottom when loading states change
+  useEffect(() => {
+    if (waitingResponse || isRecommendationLoading || isLoading) {
+      if (scrollableChatBox.current) {
+        scrollableChatBox.current.scrollTo({
+          top: scrollableChatBox.current.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [waitingResponse, isRecommendationLoading, isLoading]);
+
   return (
     <section className="mx-5 p-5 w-3/5 text-white border border-gray-300 rounded-lg shadow-lg ml-2.5 overflow-auto">
       <div className="flex flex-row items-center w-full">
@@ -609,7 +621,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
           {chats.length !== 0 ? (
             <div
               ref={scrollableChatBox}
-              className="h-[calc(100vh-346px)] overflow-auto"
+              className="h-[calc(100vh-346px)] overflow-auto scroll-smooth"
             >
               {chats.map((chat: any) => (
                 <ChatBox
@@ -623,7 +635,11 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
                   cancel={cancel}
                 />
               ))}
-              {(waitingResponse || isRecommendationLoading) ? <LinearProgress /> : null}
+              {(waitingResponse || isRecommendationLoading || isLoading) && (
+                <div className="mt-4">
+                  <LinearProgress />
+                </div>
+              )}
             </div>
           ) : (
             <div

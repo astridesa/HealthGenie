@@ -62,6 +62,8 @@ const App = () => {
 
   const [graphHeight, setGraphHeight] = useState(80); // percentage of viewport height
 
+  const [isLoading, setIsLoading] = useState(false);
+
   const handleClearVisualization = () => {
     // Reset visualization data to initial state
     setVisData({ nodes, links });
@@ -284,6 +286,7 @@ const App = () => {
               setLocalHistory={setLocalHistory}
               localUserId={localUserId}
               setChats={setChats}
+              setIsLoading={setIsLoading}
             />
           </div>
         </div>
@@ -306,7 +309,7 @@ const App = () => {
           recommendQuery={recommendQuery}
           setRecommendQuery={setRecommendQuery}
           onSendMessage={() => {}}
-          isLoading={false}
+          isLoading={isLoading}
           currentHistory={currentHistory}
           setVisData={setVisData}
         />

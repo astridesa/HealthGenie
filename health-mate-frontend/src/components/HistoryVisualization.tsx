@@ -17,6 +17,7 @@ interface HistoryVisualizationProps {
   setLocalHistory: React.Dispatch<React.SetStateAction<ChatSession[]>>;
   localUserId: string;
   setChats: React.Dispatch<React.SetStateAction<any[]>>;
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const fetchHistory = async (userId: string) => {
@@ -68,7 +69,7 @@ const applyHistory = async (userId: string) => {
   return response.json();
 };
 
-const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId, setChats }) => {
+const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistory, setLocalHistory, localUserId, setChats, setIsLoading }) => {
   // Fetch history from server
   const { data: serverHistory } = useQuery({
     queryKey: ['history', localUserId],
@@ -144,6 +145,8 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
 
   const handleApply = async () => {
     try {
+      setIsLoading(true);  // Start loading
+
       // First call apply mutation
       await applyMutation.mutateAsync({
         id: localUserId,
@@ -191,6 +194,8 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
 
     } catch (error) {
       console.error('Error in handleApply:', error);
+    } finally {
+      setIsLoading(false);  // End loading regardless of success or failure
     }
   };
 
