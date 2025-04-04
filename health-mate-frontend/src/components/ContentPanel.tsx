@@ -440,7 +440,7 @@ const ContentPanel: React.FC<ContentPanelProps> = ({
       // Write the recommendation to history with proper format
       const historyData = {
         id: localUserId,
-        type: "chat",
+        type: "recommendation",
         content: data.recommendationQuery,
         time: new Date().toISOString(),
       };

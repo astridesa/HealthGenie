@@ -14,8 +14,8 @@ from main_new import (
     do_new_recommendation,
     do_new_round,
     do_chase_question,
-    init_history_csv,
     init_history_file,
+    do_include_exclude,
 )
 
 
@@ -128,8 +128,15 @@ def write_history(history):
         content = history["content"]
         time = history["time"]
 
-        # Accept include/exclude/cancel/apply/chat operations
-        if type not in ["include", "exclude", "cancel", "apply", "chat"]:
+        # Accept include/exclude/cancel/apply/chat/recommendation operations
+        if type not in [
+            "include",
+            "exclude",
+            "cancel",
+            "apply",
+            "chat",
+            "recommendation",
+        ]:
             logger.info(f"Skipping unsupported history type: type={type}")
             return
 
@@ -310,7 +317,7 @@ def recommend():
     3. Conversations between user and assistant messages.
     ### Task Requirement:
     1. Carefully analyze the interaction history to understand the user's preferences and current intention.
-    2. Generate proactively open question that aligns with their demonstrated preferences, meanwhile it also keep the question open and not limited to the history.
+    2. Generate proactively open question that aligns with their demonstrated preferences, meanwhile it also keep the question open and not limited to the history
     3. Match the output language (Chinese/English) to the user's conversation language.
     4. Format the output as plain text only.
     5. Use a proactive yet gentle tone in your recommendation.
@@ -346,6 +353,15 @@ def recommend():
     return jsonify({"recommendationQuery": response})
 
 
+@app.route("/api/operation", methods=["POST"])
+def get_operation():
+    data = request.get_json()
+    user_id = data.get("userId", "")
+    operation = read_operation_history(user_id)
+    final_answer = do_include_exclude(operation)
+    return jsonify({"finalAnswer": final_answer})
+
+
 @app.route("/api/question", methods=["POST"])
 def answer_question():
     try:
@@ -375,6 +391,7 @@ def answer_question():
         kg_llm_retrive_path = os.path.join(
             HISTORY_DIR, user_id + "_task" + str(new_session_count) + ".csv"
         )
+        init_history_file(kg_llm_retrive_path)
         # Check if this is the first chat message
         is_first_chat = False
         if not user_history:
@@ -399,18 +416,14 @@ def answer_question():
         init_history_file(kg_llm_retrive_path)
         if is_first_chat:
             # print(is_first_chat)
-            init_history_csv()
             kg_reulsts, final_answer = do_new_round(question, nutrition_kg)
             knowledgeGraph = (
                 pandas_to_json(kg_reulsts) if not kg_reulsts.empty else None
             )
         if not is_first_chat:
             recommend_or_answer = clarify_query_intend(question)
-            print("recommend_or_answer")
-            print(recommend_or_answer)
-            print(kg_llm_retrive_path)
             if recommend_or_answer:
-                kg_reulsts, final_answer = do_new_recommendation(question, nutrition_kg)
+                kg_reulsts, final_answer = do_new_round(question, nutrition_kg)
                 knowledgeGraph = (
                     pandas_to_json(kg_reulsts) if not kg_reulsts.empty else None
                 )
@@ -439,7 +452,34 @@ def answer_question():
 
 
 def clarify_query_intend(question):
-    clarify_system_prompt = "You are a query intention prediction expert, your task is to justify whether user'query intention is to obtain a new recipe or obtain answers. If the intention is to obtain recipe, output 'yes'; if the intention is to obtain answers, output 'no', the ouput only can be 'yes' or 'no', no other words."
+    clarify_system_prompt = """
+    You are an expert query classifier specializing in culinary intent recognition. For each input query, strictly follow these steps:
+
+    1. Analyze the query for these recipe indicators:
+    - Requests containing explicit recipe terms (e.g., "recipe", "ingredients", "step-by-step")
+    - Implicit cooking verbs (e.g., "make", "prepare", "cook", "bake")
+    - Measurement specifications (e.g., "cups", "tablespoons", "grams")
+    - Meal component descriptors (e.g., "dinner idea", "weeknight meal")
+
+    2. Identify answer-seeking patterns:
+    - Factual food science questions (e.g., "why does...", "how does...")
+    - Culinary technique explanations
+    - Ingredient substitution inquiries
+    - Troubleshooting cooking issues
+    - Historical/nutritional food facts
+
+    3. Classification protocol:
+    - If query contains ANY recipe indicators → 'yes'
+    - If recipe indicators coexist with answer elements → prioritize recipe intent → 'yes'
+    - Only clear non-recipe culinary questions → 'no'
+
+    Output Requirements:
+    - Strictly lowercase 'yes'/'no' without punctuation
+    - No additional explanations
+    - 100% adherence to output format
+    - Confidence threshold: ≥80% certainty
+
+    """
     messages = [
         {"role": "system", "content": clarify_system_prompt},
         {"role": "system", "content": question},
@@ -596,6 +636,102 @@ def read_chat_session_history(user_id: str) -> list:
         return result_json
     except Exception as e:
         logger.error(f"Error reading chat session history: {str(e)}")
+        return []
+
+
+def read_last_history(user_id: str) -> list:
+    """
+    Read the chat session history for a given user ID and return records
+    where the final chat content is "New chat session".
+
+    Args:
+        user_id (str): The user ID to read history for
+
+    Returns:
+        list: A list of history records where the final chat content is "New chat session"
+    """
+    try:
+        user_history_path = get_user_history_path(user_id)
+
+        if not user_history_path.exists():
+            logger.info(f"No history file found for user {user_id}")
+            return []
+
+        # Read all records
+        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
+            reader = csv.reader(file)
+            rows = list(reader)
+
+        if not rows:
+            logger.info(f"History file for user {user_id} is empty.")
+            return []
+
+        # Skip header row
+        history_rows = rows[-1]
+        result = {}
+        result["type"] = history_rows[0]
+        result["content"] = history_rows[1]
+        result["time"] = history_rows[2]
+        return result
+    except Exception as e:
+        logger.error(f"Error reading chat session history: {str(e)}")
+        return []
+
+
+def read_operation_history(user_id: str) -> list:
+    """
+    Read the chat session history for a given user ID and return records
+    where the final chat content is "New chat session".
+
+    Args:
+        user_id (str): The user ID to read history for
+
+    Returns:
+        list: A list of history records where the final chat content is "New chat session"
+    """
+    try:
+        user_history_path = get_user_history_path(user_id)
+
+        if not user_history_path.exists():
+            logger.info(f"No history file found for user {user_id}")
+            return []
+
+        # Read all records
+        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
+            reader = csv.reader(file)
+            rows = list(reader)
+
+        if not rows:
+            logger.info(f"History file for user {user_id} is empty.")
+            return []
+
+        # Skip header row
+        history_rows = rows[1:]
+
+        # Process rows in reverse to find the most recent "New chat session"
+        result = []
+
+        for row in reversed(history_rows):
+            if len(row) == 3:
+                type_, content, time = row
+                if type_ == "apply":
+                    break
+                else:
+                    if type_ == "include" or type_ == "exclude":
+                        result.append({"type": type_, "content": content, "time": time})
+                    # Stop when we find the first "New chat session" and subsequent records
+
+        # Return in chronological order
+        result_json = {}
+        result_json["include"] = [
+            r["conent"] for r in reversed(result) if r["type"] == "include"
+        ]
+        result_json["exclude"] = [
+            r["content"] for r in reversed(result) if r["type"] == "exclude"
+        ]
+        return result_json
+    except Exception as e:
+        logger.error(f"Error reading operation history: {str(e)}")
         return []
 
 
