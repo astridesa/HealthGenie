@@ -94,7 +94,7 @@ const sendClickHistory = async (history: ChatSession, localUserId: string) => {
 
 const Visualization: React.FC<VisualizationProps> = (props) => {
   const d3Container = useRef<SVGSVGElement>(null);
-  const [levelValue, setLevelValue] = useState(1);
+  const [levelValue, setLevelValue] = useState(2);
   const [subgraphData, setSubgraphData] = useState<any>(null);
   const [simulation, setSimulation] = useState<d3.Simulation<D3Node, D3Link> | null>(null);
   const [mentionedNodes, setMentionedNodes] = useState<D3Node[]>([]);

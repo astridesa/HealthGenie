@@ -20,6 +20,7 @@ from main_new import (
 
 
 from main_new import NutritionKG
+from datetime import datetime
 
 nutrition_kg = NutritionKG()
 
@@ -305,23 +306,24 @@ def recommend():
 
     user_id = data.get("userId", "")
     user_history = read_chat_session_history(user_id)
-    sys_prompt = "You are an expert in predicting user health consultation intentions, specializing in recipe recommendation systems. Your task is to analyze the user's interaction history and predict their current need, then generate an approriate open question."
+    sys_prompt = "You are an expert in predicting user health consultation intentions, specializing in recipe recommendation and health consultation systems. Your task is to analyze the user's interaction history and predict their current need, then generate an approriate open question."
     query_recommend_prompt = """
     
     ### Interaction History Format
-    1. The system helps users find recipes through a knowledge graph interface where users can include/exclude ingredients.
+    1. The system helps users discover recipes through a knowledge graph interface where they can include or exclude ingredients based on their needs or preferences.
     2. History records contain the following fields:
-    - type: "include", "exclude", "recommend" means the recommendation query, "apply" means the user apply the recommendation, "chat" (both user messages and assistant responses)
+    - type: "include", "exclude", "recommend"(means the recommendation query), "apply"(user ask a recipe recommendation request for include/exclude ingredients), "chat" (both user messages and assistant responses)
     - content: The main text of the interaction
     - time: Timestamp of the interaction
     3. Conversations between user and assistant messages.
     ### Task Requirement:
-    1. Carefully analyze the interaction history to understand the user's preferences and current intention.
-    2. Generate proactively open question that aligns with their demonstrated preferences, meanwhile it also keep the question open and not limited to the history
+    1. Generate a follow-up message that gently encourages the user to explore their tastes or expand their understanding of nutrition—ask open-ended and thoughtful questions to guide further discovery.
+    2. Match the output language (Chinese or English) based on the user’s language in the chat history.
     3. Match the output language (Chinese/English) to the user's conversation language.
     4. Format the output as plain text only.
-    5. Use a proactive yet gentle tone in your recommendation.
-    6. If no history exists, suggest a general recipe recommendation query.
+    5. Respond only with a single open-ended question or suggestion in plain text—avoid explanations or metadata.
+    6. Keep the tone friendly, curious, and inviting, aiming to spark interest or conversation.
+    7. If no history exists, offer a warm and open suggestion to begin recipe recommendation.
     ### Output format
     1. Provide recommended query text with proactive tone, e.g. do you want to explore the recipe with xxx ingredients?
     2. Do not include any explanations or metadata
@@ -374,6 +376,13 @@ def include_exclude():
     if "```markdown" in final_answer:
         final_answer = re.sub(r"```markdown", "", final_answer)
         final_answer = re.sub(r"```", "", final_answer)
+
+    # Write the final answer to history
+    current_time = datetime.now().isoformat()
+    write_history(
+        {"id": user_id, "type": "chat", "content": final_answer, "time": current_time}
+    )
+
     knowledgeGraph = pandas_to_json(kg_results) if not kg_results.empty else None
     return jsonify({"finalAnswer": final_answer, "knowledgeGraph": knowledgeGraph})
 
@@ -390,6 +399,11 @@ def answer_question():
         question = data.get("question", "")
         user_id = data.get("userId", "")  # Get userId from request
         user_history = read_history_with_cancellations(user_id)
+        # 判断上一个是否为生成的query
+        if user_history[-1]["type"] == "recommendation":
+            question = (
+                "assistant: " + user_history[-1]["content"] + " user: " + question
+            )
         if not question:
             logger.error("Empty question received")
             return jsonify({"error": "Question is required"}), 400
@@ -408,6 +422,7 @@ def answer_question():
             HISTORY_DIR, user_id + "_task" + str(new_session_count) + ".csv"
         )
         init_history_file(kg_llm_retrive_path)
+
         # Check if this is the first chat message
         is_first_chat = False
         if not user_history:
@@ -608,45 +623,6 @@ def read_chat_session_history(user_id: str) -> list:
         result_json["content"] = [r["content"] for r in reversed(result)]
         result_json["time"] = [r["time"] for r in reversed(result)]
         return result_json
-    except Exception as e:
-        logger.error(f"Error reading chat session history: {str(e)}")
-        return []
-
-
-def read_last_history(user_id: str) -> list:
-    """
-    Read the chat session history for a given user ID and return records
-    where the final chat content is "New chat session".
-
-    Args:
-        user_id (str): The user ID to read history for
-
-    Returns:
-        list: A list of history records where the final chat content is "New chat session"
-    """
-    try:
-        user_history_path = get_user_history_path(user_id)
-
-        if not user_history_path.exists():
-            logger.info(f"No history file found for user {user_id}")
-            return []
-
-        # Read all records
-        with open(user_history_path, mode="r", newline="", encoding="utf-8") as file:
-            reader = csv.reader(file)
-            rows = list(reader)
-
-        if not rows:
-            logger.info(f"History file for user {user_id} is empty.")
-            return []
-
-        # Skip header row
-        history_rows = rows[-1]
-        result = {}
-        result["type"] = history_rows[0]
-        result["content"] = history_rows[1]
-        result["time"] = history_rows[2]
-        return result
     except Exception as e:
         logger.error(f"Error reading chat session history: {str(e)}")
         return []

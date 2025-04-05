@@ -180,12 +180,32 @@ const HistoryVisualization: React.FC<HistoryVisualizationProps> = ({ localHistor
       const data = await response.json();
       
       if (data.finalAnswer) {
+        const currentTime = new Date().toISOString();
+
+        // Write the final answer to history
+        const historyResponse = await fetch(`${SERVER_URL}/api/history`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            id: localUserId,
+            type: 'chat',
+            content: data.finalAnswer,
+            time: currentTime
+          })
+        });
+
+        if (!historyResponse.ok) {
+          throw new Error('Failed to write history');
+        }
+
         // Add the final answer to the chatbox
         setChats(prevChats => [...prevChats, {
           id: uuidv4(),
           from: 'bot',
           content: data.finalAnswer,
-          time: new Date().toISOString()
+          time: currentTime
         }]);
 
         // Handle knowledge graph data if available
