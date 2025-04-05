@@ -318,7 +318,7 @@ def recommend():
     3. Conversations between user and assistant messages.
     ### Task Requirement:
     1. Generate a follow-up message that gently encourages the user to explore their tastes or expand their understanding of nutrition—ask open-ended and thoughtful questions to guide further discovery.
-    2. Match the output language (Chinese or English) based on the user’s language in the chat history.
+    2. Match the output language (Chinese or English) based on the user's language in the chat history.
     3. Match the output language (Chinese/English) to the user's conversation language.
     4. Format the output as plain text only.
     5. Respond only with a single open-ended question or suggestion in plain text—avoid explanations or metadata.
@@ -691,6 +691,4 @@ if __name__ == "__main__":
         logger.error(
             "Failed to connect to Azure OpenAI API. Server will start but API calls may fail."
         )
-    app.run(host="0.0.0.0", port=5001, debug=True)
-
     app.run(host="0.0.0.0", port=5001, debug=True)
