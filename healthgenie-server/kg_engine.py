@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import random
 import time
 import openai
@@ -793,38 +792,3 @@ def do_include_exclude(user_text, nutrition_kg: NutritionKG):
         merged_kg = pd.DataFrame()
 
     return merged_kg, final_ans
-
-
-def main():
-    print("=== Multi-turn interactive system ===")
-    print("Type 'exit' to quit at any time.")
-
-    init_history_file()
-    nutrition_kg = NutritionKG(CSV_PATH)
-
-    while True:
-        user_text = input("\nPlease enter your question (or follow-up): ").strip()
-        if user_text.lower() == "exit":
-            print("Shutting down.")
-            break
-
-        is_json_input = False
-        try:
-            test_data = json.loads(user_text)
-            if ("include" in test_data) or ("exclude" in test_data):
-                is_json_input = True
-        except:
-            pass
-
-        if is_json_input:
-            do_include_exclude(user_text, nutrition_kg)
-        elif "do_chase_question" in user_text.lower():
-            do_chase_question(user_text)
-        elif "do_new_recommendation" in user_text.lower():
-            do_new_recommendation(user_text, nutrition_kg)
-        else:
-            do_new_round(user_text, nutrition_kg)
-
-
-if __name__ == "__main__":
-    main()

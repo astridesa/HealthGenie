@@ -10,7 +10,7 @@ import logging
 import traceback
 import re
 from pathlib import Path
-from main_new import (
+from kg_engine import (
     do_new_recommendation,
     do_new_round,
     do_chase_question,
@@ -19,7 +19,7 @@ from main_new import (
 )
 
 
-from main_new import NutritionKG
+from kg_engine import NutritionKG
 from datetime import datetime
 
 nutrition_kg = NutritionKG()
