@@ -1,0 +1,27 @@
+body {
+  margin: 0;
+  font-family: "Roboto", "Helvetica", "Arial", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* background-color: rgba(240, 238, 229, 0.5); */
+}
+
+.MuiFormLabel-root {
+  color: #012027 !important;
+}
+
+.MuiInput-underline:before {
+  border-bottom-color: #012027 !important;
+}
+
+.MuiInput-underline:hover:before {
+  border-bottom-color: #012027 !important;
+}
+
+.MuiIconButton-root {
+  color: #012027 !important;
+}
+
+.MuiInputBase-input {
+  color: #012027 !important;
+}
